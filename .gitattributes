@@ -1,0 +1,31 @@
+# 设置默认行为，如果没有其他规则匹配
+* text=auto
+
+# 明确声明你想要始终规范化并转换为本地行结束符的文件
+*.java text
+*.xml text
+*.yml text
+*.yaml text
+*.md text
+*.txt text
+*.properties text
+*.json text
+
+# 声明你想要始终保持 LF 行结束符的文件（即使在 Windows 上）
+*.sh text eol=lf
+
+# 声明你想要始终保持 CRLF 行结束符的文件
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 声明应该保持二进制的文件
+*.jar binary
+*.class binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.tar.gz binary
+*.rar binary

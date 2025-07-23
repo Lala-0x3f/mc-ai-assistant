@@ -1,0 +1,117 @@
+# Maven 构建目录
+target/
+!target/
+target/**
+
+# Maven 依赖缓存
+dependency-reduced-pom.xml
+
+# 编译后的 Java 类文件
+*.class
+
+# JAR 文件
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# 日志文件
+*.log
+logs/
+
+# Maven 临时文件
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+
+# IDE 相关文件
+## IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+## Eclipse
+.metadata
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.settings/
+.loadpath
+.recommenders
+.project
+.classpath
+
+## NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+## VS Code
+.vscode/
+
+# 操作系统生成的文件
+## Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+## macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+## Linux
+*~
+
+# 临时文件
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# 配置文件（可能包含敏感信息）
+config.yml
+config.properties
+*.env
+.env
+
+# 测试覆盖率报告
+coverage/
+*.lcov
+
+# 构建工具生成的文件
+build/
+dist/
+
+# 包管理器文件
+node_modules/
+package-lock.json
+yarn.lock
+
+# 其他常见的忽略文件
+*.orig
+*.rej

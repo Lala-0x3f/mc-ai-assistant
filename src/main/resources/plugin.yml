@@ -1,0 +1,22 @@
+name: McAiAssistant
+version: '0.0.3'
+main: com.mcaiassistant.mcaiassistant.McAiAssistant
+api-version: '1.21'
+description: AI Assistant plugin for PaperMC 1.21.4
+author: ifctmzzz
+website: https://github.com/Lala-0x3f/mc-ai-assistant
+
+# 软依赖 RedisChat 插件
+softdepend: [RedisChat]
+
+# 权限节点
+permissions:
+  mcaiassistant.use:
+    description: 允许使用 AI 助手
+    default: true
+  
+  mcaiassistant.admin:
+    description: 允许管理 AI 助手插件
+    default: op
+    children:
+      mcaiassistant.use: true
