@@ -8,8 +8,11 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -37,12 +40,43 @@ public class AiApiClient {
      */
     private OkHttpClient createHttpClient() {
         OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
-                .connectTimeout(configManager.getTimeout(), TimeUnit.SECONDS)
-                .readTimeout(configManager.getTimeout(), TimeUnit.SECONDS)
-                .writeTimeout(configManager.getTimeout(), TimeUnit.SECONDS)
+                .connectTimeout(configManager.getConnectTimeout(), TimeUnit.SECONDS)
+                .readTimeout(configManager.getReadTimeout(), TimeUnit.SECONDS)
+                .writeTimeout(configManager.getWriteTimeout(), TimeUnit.SECONDS)
                 .followRedirects(true)
                 .followSslRedirects(true)
                 .retryOnConnectionFailure(true);
+
+        // 配置连接池
+        ConnectionPool connectionPool = new ConnectionPool(
+                configManager.getConnectionPoolMaxIdle(),
+                configManager.getConnectionKeepAliveDuration(),
+                TimeUnit.SECONDS
+        );
+        clientBuilder.connectionPool(connectionPool);
+
+        // 配置调度器（控制并发请求数）
+        Dispatcher dispatcher = new Dispatcher();
+        dispatcher.setMaxRequests(configManager.getMaxRequests());
+        dispatcher.setMaxRequestsPerHost(configManager.getMaxRequestsPerHost());
+        clientBuilder.dispatcher(dispatcher);
+
+        // DNS 优化
+        if (configManager.isDnsOptimizationEnabled()) {
+            clientBuilder.dns(hostname -> {
+                try {
+                    // 使用系统DNS解析，并返回所有IP地址
+                    InetAddress[] addresses = InetAddress.getAllByName(hostname);
+                    return Arrays.asList(addresses);
+                } catch (UnknownHostException e) {
+                    // 如果解析失败，返回空列表让OkHttp使用默认DNS
+                    if (configManager.isDebugMode()) {
+                        plugin.getLogger().warning("DNS解析失败: " + hostname + " - " + e.getMessage());
+                    }
+                    return Arrays.asList();
+                }
+            });
+        }
 
         // 根据配置决定是否添加浏览器模拟拦截器
         if (configManager.isSimulateBrowser()) {
@@ -83,6 +117,18 @@ public class AiApiClient {
     }
 
     /**
+     * 发送消息到 AI API（带知识库信息）
+     *
+     * @param message 用户消息
+     * @param context 上下文消息列表
+     * @param knowledgeInfo 知识库查询结果
+     * @return AI 响应
+     */
+    public String sendMessageWithKnowledge(String message, List<String> context, String knowledgeInfo) throws IOException {
+        return sendMessage(message, context, false, knowledgeInfo);
+    }
+
+    /**
      * 发送消息到 AI API
      *
      * @param message 用户消息
@@ -91,8 +137,21 @@ public class AiApiClient {
      * @return AI 响应
      */
     public String sendMessage(String message, List<String> context, boolean isSearch) throws IOException {
+        return sendMessage(message, context, isSearch, null);
+    }
+
+    /**
+     * 发送消息到 AI API
+     *
+     * @param message 用户消息
+     * @param context 上下文消息列表
+     * @param isSearch 是否为搜索请求
+     * @param knowledgeInfo 知识库信息
+     * @return AI 响应
+     */
+    public String sendMessage(String message, List<String> context, boolean isSearch, String knowledgeInfo) throws IOException {
         // 构建请求体
-        JsonObject requestBody = buildRequestBody(message, context, isSearch);
+        JsonObject requestBody = buildRequestBody(message, context, isSearch, knowledgeInfo);
 
         // 创建 HTTP 请求
         Request.Builder requestBuilder = new Request.Builder()
@@ -182,13 +241,20 @@ public class AiApiClient {
      * 构建 API 请求体
      */
     private JsonObject buildRequestBody(String message, List<String> context) {
-        return buildRequestBody(message, context, false);
+        return buildRequestBody(message, context, false, null);
     }
 
     /**
      * 构建 API 请求体
      */
     private JsonObject buildRequestBody(String message, List<String> context, boolean isSearch) {
+        return buildRequestBody(message, context, isSearch, null);
+    }
+
+    /**
+     * 构建 API 请求体
+     */
+    private JsonObject buildRequestBody(String message, List<String> context, boolean isSearch, String knowledgeInfo) {
         JsonObject requestBody = new JsonObject();
 
         // 根据是否为搜索请求选择模型
@@ -203,7 +269,7 @@ public class AiApiClient {
         // 添加系统提示词
         JsonObject systemMessage = new JsonObject();
         systemMessage.addProperty("role", "system");
-        String systemPrompt = buildSystemPrompt(isSearch);
+        String systemPrompt = buildSystemPrompt(isSearch, knowledgeInfo);
         systemMessage.addProperty("content", systemPrompt);
         messages.add(systemMessage);
 
@@ -235,10 +301,23 @@ public class AiApiClient {
      * 构建增强的系统提示词
      */
     private String buildSystemPrompt(boolean isSearch) {
+        return buildSystemPrompt(isSearch, null);
+    }
+
+    /**
+     * 构建增强的系统提示词（带知识库信息）
+     */
+    private String buildSystemPrompt(boolean isSearch, String knowledgeInfo) {
         String basePrompt = configManager.getSystemPrompt();
 
         if (isSearch) {
-            return basePrompt + "\n\n特别注意：这是一个网络搜索请求。请使用你的搜索能力来获取最新的信息，并提供准确、及时的答案。";
+            basePrompt += "\n\n特别注意：这是一个网络搜索请求。请使用你的搜索能力来获取最新的信息，并提供准确、及时的答案。";
+        }
+
+        // 如果有知识库信息，添加到系统提示词中
+        if (knowledgeInfo != null && !knowledgeInfo.trim().isEmpty()) {
+            basePrompt += "\n\n<useful_info>\n" + knowledgeInfo + "\n</useful_info>\n\n" +
+                         "以上是从知识库中查询到的相关信息，请结合这些信息来回答用户的问题。如果知识库信息与问题相关，请优先使用这些信息。";
         }
 
         return basePrompt;

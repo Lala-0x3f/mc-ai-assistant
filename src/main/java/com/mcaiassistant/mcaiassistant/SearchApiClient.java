@@ -9,9 +9,12 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -39,12 +42,43 @@ public class SearchApiClient {
      */
     private OkHttpClient createHttpClient() {
         OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
-                .connectTimeout(configManager.getTimeout(), TimeUnit.SECONDS)
-                .readTimeout(configManager.getTimeout(), TimeUnit.SECONDS)
-                .writeTimeout(configManager.getTimeout(), TimeUnit.SECONDS)
+                .connectTimeout(configManager.getConnectTimeout(), TimeUnit.SECONDS)
+                .readTimeout(configManager.getReadTimeout(), TimeUnit.SECONDS)
+                .writeTimeout(configManager.getWriteTimeout(), TimeUnit.SECONDS)
                 .followRedirects(true)
                 .followSslRedirects(true)
                 .retryOnConnectionFailure(true);
+
+        // 配置连接池
+        ConnectionPool connectionPool = new ConnectionPool(
+                configManager.getConnectionPoolMaxIdle(),
+                configManager.getConnectionKeepAliveDuration(),
+                TimeUnit.SECONDS
+        );
+        clientBuilder.connectionPool(connectionPool);
+
+        // 配置调度器（控制并发请求数）
+        Dispatcher dispatcher = new Dispatcher();
+        dispatcher.setMaxRequests(configManager.getMaxRequests());
+        dispatcher.setMaxRequestsPerHost(configManager.getMaxRequestsPerHost());
+        clientBuilder.dispatcher(dispatcher);
+
+        // DNS 优化
+        if (configManager.isDnsOptimizationEnabled()) {
+            clientBuilder.dns(hostname -> {
+                try {
+                    // 使用系统DNS解析，并返回所有IP地址
+                    InetAddress[] addresses = InetAddress.getAllByName(hostname);
+                    return Arrays.asList(addresses);
+                } catch (UnknownHostException e) {
+                    // 如果解析失败，返回空列表让OkHttp使用默认DNS
+                    if (configManager.isDebugMode()) {
+                        plugin.getLogger().warning("DNS解析失败: " + hostname + " - " + e.getMessage());
+                    }
+                    return Arrays.asList();
+                }
+            });
+        }
         
         // 根据配置决定是否添加浏览器模拟拦截器
         if (configManager.isSimulateBrowser()) {

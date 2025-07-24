@@ -191,6 +191,9 @@ public class RedisChatCompatibility implements Listener {
                     plugin.getLogger().info("RedisChat 消息包含搜索触发词: " + message);
                 }
 
+                // 标记消息为已处理，避免ChatListener重复处理
+                chatListener.markMessageAsProcessed(player, message);
+
                 // 检查权限
                 if (!chatListener.hasPermission(player)) {
                     if (configManager.isDebugMode()) {
@@ -209,6 +212,9 @@ public class RedisChatCompatibility implements Listener {
                 if (configManager.isDebugMode()) {
                     plugin.getLogger().info("RedisChat 消息包含 AI 触发词: " + message);
                 }
+
+                // 标记消息为已处理，避免ChatListener重复处理
+                chatListener.markMessageAsProcessed(player, message);
 
                 // 检查权限
                 if (!chatListener.hasPermission(player)) {

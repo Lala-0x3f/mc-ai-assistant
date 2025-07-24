@@ -16,6 +16,7 @@ public class McAiAssistant extends JavaPlugin {
     private ChatHistoryManager chatHistoryManager;
     private AiApiClient aiApiClient;
     private SearchApiClient searchApiClient;
+    private KnowledgeApiClient knowledgeApiClient;
     private RedisChatCompatibility redisChatCompatibility;
     private ToastNotification toastNotification;
     private RateLimitManager rateLimitManager;
@@ -37,6 +38,9 @@ public class McAiAssistant extends JavaPlugin {
         // 初始化搜索 API 客户端
         searchApiClient = new SearchApiClient(configManager);
 
+        // 初始化知识库 API 客户端
+        knowledgeApiClient = new KnowledgeApiClient(configManager);
+
         // 初始化 Toast 通知
         toastNotification = new ToastNotification(this);
 
@@ -44,7 +48,7 @@ public class McAiAssistant extends JavaPlugin {
         rateLimitManager = new RateLimitManager(this);
 
         // 注册聊天监听器
-        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, toastNotification, rateLimitManager);
+        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeApiClient, toastNotification, rateLimitManager);
         getServer().getPluginManager().registerEvents(chatListener, this);
 
         // 初始化 RedisChat 兼容性
@@ -65,7 +69,11 @@ public class McAiAssistant extends JavaPlugin {
         if (aiApiClient != null) {
             aiApiClient.shutdown();
         }
-        
+
+        if (knowledgeApiClient != null) {
+            knowledgeApiClient.shutdown();
+        }
+
         getLogger().info(ChatColor.YELLOW + "MC AI Assistant 插件已禁用！");
         instance = null;
     }
@@ -97,6 +105,13 @@ public class McAiAssistant extends JavaPlugin {
     public AiApiClient getAiApiClient() {
         return aiApiClient;
     }
+
+    /**
+     * 获取知识库 API 客户端
+     */
+    public KnowledgeApiClient getKnowledgeApiClient() {
+        return knowledgeApiClient;
+    }
     
     /**
      * 获取 RedisChat 兼容性处理器
@@ -118,6 +133,7 @@ public class McAiAssistant extends JavaPlugin {
     public void reloadPluginConfig() {
         configManager.loadConfig();
         aiApiClient.updateConfig(configManager);
+        knowledgeApiClient.updateConfig(configManager);
         getLogger().info("配置已重载");
     }
 }

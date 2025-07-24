@@ -61,6 +61,40 @@ search:
   # 搜索工具类型
   tool_type: "web_search_preview"
 
+# 知识库配置
+knowledge:
+  # 是否启用知识库功能
+  enabled: false
+
+  # 知识库 API URL (Dify API)
+  api_url: "https://api.dify.ai"
+
+  # 知识库 API Key (格式: app-...)
+  api_key: "your-knowledge-api-key-here"
+
+# 网络性能优化配置
+network:
+  # 连接池配置
+  # 连接池可以复用TCP连接，减少建立连接的开销
+  connection_pool_max_idle: 5          # 连接池最大空闲连接数（推荐：3-10）
+  connection_pool_max_total: 20        # 连接池最大总连接数（推荐：10-50）
+  keep_alive_duration: 300             # 连接保持时间（秒，推荐：300-600）
+
+  # 并发请求控制
+  # 控制同时发送的请求数量，避免过载
+  max_requests: 64                     # 全局最大并发请求数（推荐：32-128）
+  max_requests_per_host: 5             # 每个主机最大并发请求数（推荐：3-10）
+
+  # 超时配置（秒）
+  # 较短的超时可以更快发现网络问题，但可能导致请求失败
+  connect_timeout: 10                  # 连接超时（推荐：5-15秒）
+  read_timeout: 30                     # 读取超时（推荐：20-60秒）
+  write_timeout: 30                    # 写入超时（推荐：20-60秒）
+
+  # 网络优化选项
+  dns_optimization: true               # 启用DNS优化（推荐：true）
+  http2_enabled: true                  # 启用HTTP/2支持（推荐：true）
+
 # 系统提示词
 system_prompt: |
   你是一个 Minecraft 服务器的 AI 助手。你需要：

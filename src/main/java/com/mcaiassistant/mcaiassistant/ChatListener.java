@@ -14,7 +14,9 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
@@ -28,22 +30,27 @@ public class ChatListener implements Listener {
     private final ChatHistoryManager chatHistoryManager;
     private final AiApiClient aiApiClient;
     private final SearchApiClient searchApiClient;
+    private final KnowledgeApiClient knowledgeApiClient;
     private final ToastNotification toastNotification;
     private final RateLimitManager rateLimitManager;
     
     // 智能匹配模式，避免匹配到 @airport 等词
     private static final Pattern SMART_AI_PATTERN = Pattern.compile("(?:^|\\s)@ai(?:\\s|$|[^a-zA-Z])", Pattern.CASE_INSENSITIVE);
     private static final Pattern SMART_SEARCH_PATTERN = Pattern.compile("(?:^|\\s)@search(?:\\s|$|[^a-zA-Z])", Pattern.CASE_INSENSITIVE);
+
+    // 用于跟踪已处理的消息，避免重复处理
+    private final Set<String> processedMessages = ConcurrentHashMap.newKeySet();
     
     public ChatListener(McAiAssistant plugin, ConfigManager configManager,
                        ChatHistoryManager chatHistoryManager, AiApiClient aiApiClient,
-                       SearchApiClient searchApiClient, ToastNotification toastNotification,
-                       RateLimitManager rateLimitManager) {
+                       SearchApiClient searchApiClient, KnowledgeApiClient knowledgeApiClient,
+                       ToastNotification toastNotification, RateLimitManager rateLimitManager) {
         this.plugin = plugin;
         this.configManager = configManager;
         this.chatHistoryManager = chatHistoryManager;
         this.aiApiClient = aiApiClient;
         this.searchApiClient = searchApiClient;
+        this.knowledgeApiClient = knowledgeApiClient;
         this.toastNotification = toastNotification;
         this.rateLimitManager = rateLimitManager;
     }
@@ -57,6 +64,17 @@ public class ChatListener implements Listener {
             plugin.getLogger().info("检测到玩家聊天消息: " + player.getName() + " -> " + message);
         }
 
+        // 创建消息唯一标识符，避免重复处理
+        String messageId = player.getName() + ":" + message + ":" + System.currentTimeMillis();
+
+        // 检查是否已经处理过这条消息
+        if (processedMessages.contains(messageId)) {
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("消息已被处理，跳过: " + messageId);
+            }
+            return;
+        }
+
         // 记录聊天历史
         if (configManager.isChatLoggingEnabled()) {
             chatHistoryManager.addMessage(player.getName(), message);
@@ -66,6 +84,14 @@ public class ChatListener implements Listener {
         if (containsSearchTrigger(message)) {
             if (configManager.isDebugMode()) {
                 plugin.getLogger().info("玩家聊天消息包含搜索触发词: " + message);
+            }
+
+            // 标记消息为已处理
+            processedMessages.add(messageId);
+
+            // 清理过期的消息ID（保留最近1000条）
+            if (processedMessages.size() > 1000) {
+                processedMessages.clear();
             }
 
             // 检查权限
@@ -96,6 +122,14 @@ public class ChatListener implements Listener {
         if (containsAiTrigger(message)) {
             if (configManager.isDebugMode()) {
                 plugin.getLogger().info("玩家聊天消息包含 AI 触发词: " + message);
+            }
+
+            // 标记消息为已处理
+            processedMessages.add(messageId);
+
+            // 清理过期的消息ID（保留最近1000条）
+            if (processedMessages.size() > 1000) {
+                processedMessages.clear();
             }
 
             // 检查权限
@@ -146,9 +180,26 @@ public class ChatListener implements Listener {
         if (configManager.isAllowAllPlayers()) {
             return true;
         }
-        
+
         String permission = configManager.getRequiredPermission();
         return player.hasPermission(permission);
+    }
+
+    /**
+     * 标记消息为已处理（供RedisChatCompatibility使用）
+     */
+    public void markMessageAsProcessed(Player player, String message) {
+        String messageId = player.getName() + ":" + message + ":" + System.currentTimeMillis();
+        processedMessages.add(messageId);
+
+        // 清理过期的消息ID（保留最近1000条）
+        if (processedMessages.size() > 1000) {
+            processedMessages.clear();
+        }
+
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("消息已标记为已处理: " + messageId);
+        }
     }
     
     /**
@@ -172,6 +223,24 @@ public class ChatListener implements Listener {
                     plugin.getLogger().info("开始处理 AI 请求，清理后的消息: " + cleanMessage);
                 }
 
+                // 先查询知识库
+                String knowledgeInfo = null;
+                try {
+                    knowledgeInfo = knowledgeApiClient.queryKnowledge(cleanMessage);
+                    if (configManager.isDebugMode()) {
+                        if (knowledgeInfo != null) {
+                            plugin.getLogger().info("知识库查询成功，获得相关信息长度: " + knowledgeInfo.length());
+                        } else {
+                            plugin.getLogger().info("知识库查询无结果或未启用");
+                        }
+                    }
+                } catch (Exception e) {
+                    if (configManager.isDebugMode()) {
+                        plugin.getLogger().warning("知识库查询失败: " + e.getMessage());
+                    }
+                    // 知识库查询失败不影响正常AI对话，继续处理
+                }
+
                 // 获取上下文消息
                 List<String> context = configManager.isContextEnabled() ?
                     chatHistoryManager.getRecentMessages(configManager.getContextMessages()) : null;
@@ -180,8 +249,8 @@ public class ChatListener implements Listener {
                     plugin.getLogger().info("AI 请求上下文消息数量: " + context.size());
                 }
 
-                // 调用 AI API
-                return aiApiClient.sendMessage(cleanMessage, context);
+                // 调用 AI API，传递知识库信息
+                return aiApiClient.sendMessageWithKnowledge(cleanMessage, context, knowledgeInfo);
             } catch (Exception e) {
                 plugin.getLogger().severe("AI API 调用失败: " + e.getMessage());
                 if (configManager.isDebugMode()) {
@@ -431,8 +500,8 @@ public class ChatListener implements Listener {
             }
         }
 
-        // 广播到控制台
-        Bukkit.broadcastMessage(consoleMessage.toString());
+        // 仅在控制台显示搜索结果（不广播给玩家）
+        plugin.getLogger().info(consoleMessage.toString());
 
         // 记录搜索响应到聊天历史
         if (configManager.isChatLoggingEnabled()) {

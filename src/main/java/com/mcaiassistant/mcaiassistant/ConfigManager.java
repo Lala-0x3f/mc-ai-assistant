@@ -142,6 +142,60 @@ public class ConfigManager {
         return config.getString("permissions.required_permission", "mcaiassistant.use");
     }
 
+    // 知识库配置
+    public String getKnowledgeApiUrl() {
+        return config.getString("knowledge.api_url", "https://api.dify.ai");
+    }
+
+    public String getKnowledgeApiKey() {
+        return config.getString("knowledge.api_key", "");
+    }
+
+    public boolean isKnowledgeEnabled() {
+        return config.getBoolean("knowledge.enabled", false);
+    }
+
+    // 网络性能配置
+    public int getConnectionPoolMaxIdle() {
+        return config.getInt("network.connection_pool_max_idle", 5);
+    }
+
+    public int getConnectionPoolMaxTotal() {
+        return config.getInt("network.connection_pool_max_total", 20);
+    }
+
+    public long getConnectionKeepAliveDuration() {
+        return config.getLong("network.keep_alive_duration", 300); // 5分钟
+    }
+
+    public int getMaxRequestsPerHost() {
+        return config.getInt("network.max_requests_per_host", 5);
+    }
+
+    public int getMaxRequests() {
+        return config.getInt("network.max_requests", 64);
+    }
+
+    public boolean isDnsOptimizationEnabled() {
+        return config.getBoolean("network.dns_optimization", true);
+    }
+
+    public int getConnectTimeout() {
+        return config.getInt("network.connect_timeout", 10);
+    }
+
+    public int getReadTimeout() {
+        return config.getInt("network.read_timeout", 30);
+    }
+
+    public int getWriteTimeout() {
+        return config.getInt("network.write_timeout", 30);
+    }
+
+    public boolean isHttp2Enabled() {
+        return config.getBoolean("network.http2_enabled", true);
+    }
+
     // UI 通知配置
     public boolean isToastEnabled() {
         return config.getBoolean("notifications.enable_toast", true);
