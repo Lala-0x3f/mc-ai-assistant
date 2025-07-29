@@ -320,6 +320,17 @@ public class AiApiClient {
                          "以上是从知识库中查询到的相关信息，请结合这些信息来回答用户的问题。如果知识库信息与问题相关，请优先使用这些信息。";
         }
 
+        // 如果启用了图像生成功能，添加图像生成指令
+        if (configManager.isImageGenerationEnabled()) {
+            basePrompt += "\n\n如果玩家要求画图，你要使用 create_image 给玩家生成参考图，每次响应只能使用一次\n" +
+                         "如果你要生成一张图像，请在响应中添加一行\n\n" +
+                         "<create_image prompt=\"\" alt=\"\" />\n\n" +
+                         "Prompt 必须是纯英语，否则无法生成，Prompt 不支持任何额外的配置参数\n" +
+                         "Alt 是图像的中文描述，用于在游戏中显示，应该简洁美观\n" +
+                         "需要格式完全准确，才能生成图像\n" +
+                         "示例：<create_image prompt=\"beautiful sunset over mountains\" alt=\"美丽的山间日落\" />";
+        }
+
         return basePrompt;
     }
 

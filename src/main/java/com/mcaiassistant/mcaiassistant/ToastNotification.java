@@ -26,6 +26,17 @@ public class ToastNotification {
     }
     
     /**
+     * 向玩家显示 Toast 通知（简化版本）
+     *
+     * @param player 目标玩家
+     * @param title 通知标题
+     * @param description 通知描述
+     */
+    public void showToast(Player player, String title, String description) {
+        showNotification(player, title, description);
+    }
+
+    /**
      * 向玩家显示通知
      *
      * @param player 目标玩家

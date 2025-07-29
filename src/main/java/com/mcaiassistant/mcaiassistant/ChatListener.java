@@ -8,6 +8,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -18,6 +19,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 /**
  * 聊天事件监听器
@@ -31,6 +33,7 @@ public class ChatListener implements Listener {
     private final AiApiClient aiApiClient;
     private final SearchApiClient searchApiClient;
     private final KnowledgeApiClient knowledgeApiClient;
+    private final ImageApiClient imageApiClient;
     private final ToastNotification toastNotification;
     private final RateLimitManager rateLimitManager;
     
@@ -44,13 +47,15 @@ public class ChatListener implements Listener {
     public ChatListener(McAiAssistant plugin, ConfigManager configManager,
                        ChatHistoryManager chatHistoryManager, AiApiClient aiApiClient,
                        SearchApiClient searchApiClient, KnowledgeApiClient knowledgeApiClient,
-                       ToastNotification toastNotification, RateLimitManager rateLimitManager) {
+                       ImageApiClient imageApiClient, ToastNotification toastNotification,
+                       RateLimitManager rateLimitManager) {
         this.plugin = plugin;
         this.configManager = configManager;
         this.chatHistoryManager = chatHistoryManager;
         this.aiApiClient = aiApiClient;
         this.searchApiClient = searchApiClient;
         this.knowledgeApiClient = knowledgeApiClient;
+        this.imageApiClient = imageApiClient;
         this.toastNotification = toastNotification;
         this.rateLimitManager = rateLimitManager;
     }
@@ -265,7 +270,7 @@ public class ChatListener implements Listener {
                 if (configManager.isDebugMode()) {
                     plugin.getLogger().info("AI 请求处理完成，响应长度: " + (response != null ? response.length() : 0));
                 }
-                sendAiResponse(response);
+                sendAiResponse(response, player);
             });
         });
     }
@@ -291,26 +296,51 @@ public class ChatListener implements Listener {
      * 发送 AI 响应到聊天
      */
     public void sendAiResponse(String response) {
+        sendAiResponse(response, null);
+    }
+
+    /**
+     * 发送 AI 响应到聊天（带玩家信息用于图像生成）
+     */
+    public void sendAiResponse(String response, Player requestPlayer) {
         if (response == null || response.trim().isEmpty()) {
             return;
         }
-        
+
         String aiName = configManager.getAiName();
         String aiPrefix = configManager.getAiPrefix();
-        
+
+        // 处理图像生成（如果有请求玩家）
+        if (requestPlayer != null) {
+            processImageGeneration(requestPlayer, response);
+        }
+
+        // 移除图像生成标签后再显示文本响应
+        String cleanResponse = removeImageTags(response);
+
+        if (cleanResponse.trim().isEmpty()) {
+            // 如果移除标签后没有文本内容，只记录到历史但不显示
+            if (configManager.isChatLoggingEnabled()) {
+                chatHistoryManager.addMessage(aiName, response);
+            }
+            return;
+        }
+
         // 格式化 AI 响应消息
-        String formattedMessage = ChatColor.AQUA + aiPrefix + ChatColor.WHITE + response;
-        
+        String formattedMessage = ChatColor.AQUA + aiPrefix + ChatColor.WHITE + cleanResponse;
+
         // 广播消息给所有在线玩家
         Bukkit.broadcastMessage(formattedMessage);
-        
+
         // 记录 AI 响应到聊天历史
         if (configManager.isChatLoggingEnabled()) {
             chatHistoryManager.addMessage(aiName, response);
         }
-        
+
         if (configManager.isDebugMode()) {
-            plugin.getLogger().info("AI 响应: " + response);
+            plugin.getLogger().info("AI 响应: " + cleanResponse);
+            plugin.getLogger().info("AI 前缀: '" + aiPrefix + "'");
+            plugin.getLogger().info("格式化消息: " + formattedMessage);
         }
     }
 
@@ -514,5 +544,154 @@ public class ChatListener implements Listener {
             plugin.getLogger().info("搜索结果: " + searchResult.getResultText());
             plugin.getLogger().info("提取的链接数量: " + (searchResult.getLinks() != null ? searchResult.getLinks().size() : 0));
         }
+    }
+
+    /**
+     * 处理图像生成标签
+     */
+    private void processImageGeneration(Player player, String response) {
+        if (!configManager.isImageGenerationEnabled()) {
+            return;
+        }
+
+        // 检查响应中是否包含图像生成标签（支持新的 alt 属性）
+        Pattern imagePattern = Pattern.compile("<create_image\\s+prompt=\"([^\"]+)\"\\s+alt=\"([^\"]+)\"\\s*/>");
+        Matcher matcher = imagePattern.matcher(response);
+
+        if (matcher.find()) {
+            String prompt = matcher.group(1);
+            String alt = matcher.group(2);
+
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[图像生成] 检测到图像生成请求，prompt: " + prompt + ", alt: " + alt);
+            }
+
+            // 显示生成开始通知
+            if (configManager.isToastEnabled()) {
+                toastNotification.showToast(player, "正在生成图像...", "请稍候，图像生成中");
+            }
+
+            // 异步生成图像
+            CompletableFuture.supplyAsync(() -> {
+                long startTime = System.currentTimeMillis();
+                ImageApiClient.ImageResponse imageResponse = imageApiClient.createImage(prompt);
+                long endTime = System.currentTimeMillis();
+                long duration = endTime - startTime;
+
+                return new Object[]{imageResponse, duration, alt};
+            }).thenAccept(result -> {
+                ImageApiClient.ImageResponse imageResponse = (ImageApiClient.ImageResponse) result[0];
+                long duration = (Long) result[1];
+                String imageAlt = (String) result[2];
+
+                // 在主线程中处理结果
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (imageResponse.isSuccess() && imageResponse.getImages() != null && !imageResponse.getImages().isEmpty()) {
+                        // 成功生成图像
+                        List<String> images = imageResponse.getImages();
+
+                        // 获取 AI 前缀
+                        String aiPrefix = configManager.getAiPrefix();
+
+                        // 创建主消息
+                        TextComponent.Builder messageBuilder = Component.text()
+                            .append(Component.text(aiPrefix, NamedTextColor.AQUA))
+                            .append(Component.text("🎨 ", NamedTextColor.GOLD))
+                            .append(Component.text("图像生成完成！", NamedTextColor.GREEN))
+                            .append(Component.text("\n📝 ", NamedTextColor.GRAY))
+                            .append(Component.text(imageAlt, NamedTextColor.WHITE)
+                                .hoverEvent(HoverEvent.showText(Component.text("原始 Prompt: " + prompt, NamedTextColor.GRAY))))
+                            .append(Component.text("\n⏱️ 用时: ", NamedTextColor.GRAY))
+                            .append(Component.text(String.format("%.1f秒", duration / 1000.0), NamedTextColor.YELLOW))
+                            .append(Component.text("\n🖼️ 生成了 ", NamedTextColor.GRAY))
+                            .append(Component.text(images.size() + " 张图像", NamedTextColor.AQUA));
+
+                        // 为每张图像添加可点击链接
+                        for (int i = 0; i < images.size(); i++) {
+                            String imagePath = images.get(i);
+                            String command = "/image create " + imagePath;
+
+                            messageBuilder.append(Component.text("\n🖱️ ", NamedTextColor.BLUE))
+                                .append(Component.text("图像 " + (i + 1), NamedTextColor.AQUA, TextDecoration.UNDERLINED)
+                                    .clickEvent(ClickEvent.suggestCommand(command))
+                                    .hoverEvent(HoverEvent.showText(Component.text()
+                                        .append(Component.text("点击获取图像 " + (i + 1), NamedTextColor.GREEN))
+                                        .append(Component.text("\n执行命令: ", NamedTextColor.GRAY))
+                                        .append(Component.text(command, NamedTextColor.WHITE))
+                                        .append(Component.text("\n路径: ", NamedTextColor.GRAY))
+                                        .append(Component.text(imagePath, NamedTextColor.YELLOW))
+                                        .build())));
+                        }
+
+                        Component imageMessage = messageBuilder.build();
+                        player.sendMessage(imageMessage);
+
+                        if (configManager.isDebugMode()) {
+                            plugin.getLogger().info("[图像生成] 成功生成 " + images.size() + " 张图像，用时: " + duration + "ms");
+                            for (int i = 0; i < images.size(); i++) {
+                                plugin.getLogger().info("[图像生成] 图像 " + (i + 1) + ": " + images.get(i));
+                            }
+                        }
+                    } else {
+                        // 生成失败
+                        String errorMsg = imageResponse.getErrorMessage() != null ?
+                            imageResponse.getErrorMessage() : "未知错误";
+
+                        String aiPrefix = configManager.getAiPrefix();
+
+                        Component errorMessage = Component.text()
+                            .append(Component.text(aiPrefix, NamedTextColor.AQUA))
+                            .append(Component.text("❌ ", NamedTextColor.RED))
+                            .append(Component.text("图像生成失败: ", NamedTextColor.RED))
+                            .append(Component.text(errorMsg, NamedTextColor.GRAY))
+                            .build();
+
+                        player.sendMessage(errorMessage);
+
+                        if (configManager.isDebugMode()) {
+                            plugin.getLogger().warning("[图像生成] 生成失败: " + errorMsg);
+                        }
+                    }
+                });
+            }).exceptionally(throwable -> {
+                // 处理异常
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    String aiPrefix = configManager.getAiPrefix();
+
+                    Component errorMessage = Component.text()
+                        .append(Component.text(aiPrefix, NamedTextColor.AQUA))
+                        .append(Component.text("❌ ", NamedTextColor.RED))
+                        .append(Component.text("图像生成异常: ", NamedTextColor.RED))
+                        .append(Component.text(throwable.getMessage(), NamedTextColor.GRAY))
+                        .build();
+
+                    player.sendMessage(errorMessage);
+                });
+
+                if (configManager.isDebugMode()) {
+                    plugin.getLogger().warning("[图像生成] 处理异常: " + throwable.getMessage());
+                    throwable.printStackTrace();
+                }
+                return null;
+            });
+        }
+    }
+
+    /**
+     * 移除响应中的图像生成标签
+     */
+    private String removeImageTags(String response) {
+        if (!configManager.isImageGenerationEnabled()) {
+            return response;
+        }
+
+        // 支持新的 alt 属性格式和旧格式
+        Pattern newImagePattern = Pattern.compile("<create_image\\s+prompt=\"[^\"]+\"\\s+alt=\"[^\"]+\"\\s*/>");
+        Pattern oldImagePattern = Pattern.compile("<create_image\\s+prompt=\"[^\"]+\"\\s*/>");
+
+        String result = newImagePattern.matcher(response).replaceAll("").trim();
+        result = oldImagePattern.matcher(result).replaceAll("").trim();
+
+        return result;
     }
 }

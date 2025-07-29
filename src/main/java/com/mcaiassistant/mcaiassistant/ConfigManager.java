@@ -155,6 +155,19 @@ public class ConfigManager {
         return config.getBoolean("knowledge.enabled", false);
     }
 
+    public String getKnowledgeDatasetId() {
+        return config.getString("knowledge.dataset_id", "");
+    }
+
+    // 图像生成配置
+    public boolean isImageGenerationEnabled() {
+        return config.getBoolean("image_generation.enabled", false);
+    }
+
+    public String getImageApiUrl() {
+        return config.getString("image_generation.api_url", "http://localhost:8000");
+    }
+
     // 网络性能配置
     public int getConnectionPoolMaxIdle() {
         return config.getInt("network.connection_pool_max_idle", 5);

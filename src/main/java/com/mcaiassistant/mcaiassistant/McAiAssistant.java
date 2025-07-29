@@ -17,6 +17,7 @@ public class McAiAssistant extends JavaPlugin {
     private AiApiClient aiApiClient;
     private SearchApiClient searchApiClient;
     private KnowledgeApiClient knowledgeApiClient;
+    private ImageApiClient imageApiClient;
     private RedisChatCompatibility redisChatCompatibility;
     private ToastNotification toastNotification;
     private RateLimitManager rateLimitManager;
@@ -41,6 +42,9 @@ public class McAiAssistant extends JavaPlugin {
         // 初始化知识库 API 客户端
         knowledgeApiClient = new KnowledgeApiClient(configManager);
 
+        // 初始化图像生成 API 客户端
+        imageApiClient = new ImageApiClient(this, configManager);
+
         // 初始化 Toast 通知
         toastNotification = new ToastNotification(this);
 
@@ -48,7 +52,7 @@ public class McAiAssistant extends JavaPlugin {
         rateLimitManager = new RateLimitManager(this);
 
         // 注册聊天监听器
-        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeApiClient, toastNotification, rateLimitManager);
+        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeApiClient, imageApiClient, toastNotification, rateLimitManager);
         getServer().getPluginManager().registerEvents(chatListener, this);
 
         // 初始化 RedisChat 兼容性
@@ -72,6 +76,10 @@ public class McAiAssistant extends JavaPlugin {
 
         if (knowledgeApiClient != null) {
             knowledgeApiClient.shutdown();
+        }
+
+        if (imageApiClient != null) {
+            imageApiClient.shutdown();
         }
 
         getLogger().info(ChatColor.YELLOW + "MC AI Assistant 插件已禁用！");
