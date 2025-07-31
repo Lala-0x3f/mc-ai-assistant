@@ -90,19 +90,28 @@ public class KnowledgeApiClient {
      * @return 知识库返回的文档片段，如果查询失败或没有结果则返回null
      */
     public String queryKnowledge(String query) throws IOException {
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[知识库API] 🔍 开始知识库查询");
+            plugin.getLogger().info("[知识库API] 查询内容: " + query);
+        }
+
         if (!configManager.isKnowledgeEnabled()) {
             if (configManager.isDebugMode()) {
-                plugin.getLogger().info("知识库功能未启用，跳过查询");
+                plugin.getLogger().info("[知识库API] ❌ 知识库功能未启用，跳过查询");
             }
             return null;
         }
-        
+
         String apiKey = configManager.getKnowledgeApiKey();
         if (apiKey == null || apiKey.trim().isEmpty()) {
             if (configManager.isDebugMode()) {
-                plugin.getLogger().warning("知识库 API Key 未配置，跳过查询");
+                plugin.getLogger().warning("[知识库API] ❌ 知识库 API Key 未配置，跳过查询");
             }
             return null;
+        }
+
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[知识库API] ✅ 配置检查通过，准备构建请求");
         }
         
         // 构建请求体
@@ -122,25 +131,26 @@ public class KnowledgeApiClient {
         Request request = requestBuilder.build();
 
         if (configManager.isDebugMode()) {
-            plugin.getLogger().info("=== 知识库 API 请求详情 ===");
-            plugin.getLogger().info("请求 URL: " + request.url());
-            plugin.getLogger().info("请求方法: " + request.method());
-            
+            plugin.getLogger().info("[知识库API] === 知识库 API 请求详情 ===");
+            plugin.getLogger().info("[知识库API] 请求 URL: " + request.url());
+            plugin.getLogger().info("[知识库API] 请求方法: " + request.method());
+
             // 记录请求头（隐藏敏感信息）
-            plugin.getLogger().info("请求头:");
+            plugin.getLogger().info("[知识库API] 请求头:");
             request.headers().forEach(pair -> {
                 String headerName = pair.getFirst();
                 String headerValue = pair.getSecond();
                 if ("Authorization".equalsIgnoreCase(headerName)) {
                     headerValue = "Bearer " + maskApiKey(apiKey);
                 }
-                plugin.getLogger().info("  " + headerName + ": " + headerValue);
+                plugin.getLogger().info("[知识库API]   " + headerName + ": " + headerValue);
             });
 
             // 记录请求体
             String requestBodyStr = requestBody.toString();
-            plugin.getLogger().info("请求体: " + requestBodyStr);
-            plugin.getLogger().info("=== 开始发送知识库请求 ===");
+            plugin.getLogger().info("[知识库API] 请求体长度: " + requestBodyStr.length() + " 字符");
+            plugin.getLogger().info("[知识库API] 请求体内容: " + requestBodyStr);
+            plugin.getLogger().info("[知识库API] === 🚀 开始发送知识库请求 ===");
         }
 
         // 发送请求并处理响应
@@ -148,7 +158,7 @@ public class KnowledgeApiClient {
             if (!response.isSuccessful()) {
                 String errorDetails = getErrorDetails(response);
                 if (configManager.isDebugMode()) {
-                    plugin.getLogger().warning("知识库 API 请求失败: " + response.code() + " " + response.message() + errorDetails);
+                    plugin.getLogger().warning("[知识库API] ❌ 知识库 API 请求失败: " + response.code() + " " + response.message() + errorDetails);
                 }
                 return null; // 知识库查询失败时返回null，不影响正常AI对话
             }
@@ -156,7 +166,7 @@ public class KnowledgeApiClient {
             ResponseBody responseBody = response.body();
             if (responseBody == null) {
                 if (configManager.isDebugMode()) {
-                    plugin.getLogger().warning("知识库 API 响应为空");
+                    plugin.getLogger().warning("[知识库API] ❌ 知识库 API 响应为空");
                 }
                 return null;
             }
@@ -164,12 +174,16 @@ public class KnowledgeApiClient {
             String responseString = responseBody.string();
 
             if (configManager.isDebugMode()) {
-                plugin.getLogger().info("知识库 API 响应成功: " + response.code() + " " + response.message());
-                plugin.getLogger().info("响应内容长度: " + responseString.length() + " 字符");
+                plugin.getLogger().info("[知识库API] ✅ 知识库 API 响应成功: " + response.code() + " " + response.message());
+                plugin.getLogger().info("[知识库API] 响应内容长度: " + responseString.length() + " 字符");
+                plugin.getLogger().info("[知识库API] 响应头信息:");
+                response.headers().forEach(pair -> {
+                    plugin.getLogger().info("[知识库API]   " + pair.getFirst() + ": " + pair.getSecond());
+                });
                 if (responseString.length() < 1000) {
-                    plugin.getLogger().info("完整响应内容: " + responseString);
+                    plugin.getLogger().info("[知识库API] 完整响应内容: " + responseString);
                 } else {
-                    plugin.getLogger().info("响应内容预览: " + responseString.substring(0, 500) + "...");
+                    plugin.getLogger().info("[知识库API] 响应内容预览: " + responseString.substring(0, 500) + "...");
                 }
             }
 
@@ -188,20 +202,29 @@ public class KnowledgeApiClient {
                 String answer = responseJson.get("answer").getAsString();
                 if (answer != null && !answer.trim().isEmpty()) {
                     if (configManager.isDebugMode()) {
-                        plugin.getLogger().info("知识库查询成功，返回内容长度: " + answer.length());
+                        plugin.getLogger().info("[知识库API] ✅ 知识库查询成功，返回内容长度: " + answer.length() + " 字符");
+                        if (answer.length() < 300) {
+                            plugin.getLogger().info("[知识库API] 完整答案内容: " + answer);
+                        } else {
+                            plugin.getLogger().info("[知识库API] 答案内容预览: " + answer.substring(0, 300) + "...");
+                        }
                     }
                     return answer;
                 }
             }
-            
+
             if (configManager.isDebugMode()) {
-                plugin.getLogger().info("知识库响应中没有找到有效的 answer 字段");
+                plugin.getLogger().info("[知识库API] ❌ 知识库响应中没有找到有效的 answer 字段");
             }
             return null;
-            
+
         } catch (Exception e) {
             if (configManager.isDebugMode()) {
-                plugin.getLogger().warning("解析知识库响应失败: " + e.getMessage());
+                plugin.getLogger().warning("[知识库API] ❌ 解析知识库响应失败: " + e.getMessage());
+                plugin.getLogger().warning("[知识库API] 异常类型: " + e.getClass().getSimpleName());
+                if (e.getCause() != null) {
+                    plugin.getLogger().warning("[知识库API] 根本原因: " + e.getCause().getMessage());
+                }
             }
             return null;
         }

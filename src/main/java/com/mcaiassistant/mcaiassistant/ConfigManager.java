@@ -159,6 +159,10 @@ public class ConfigManager {
         return config.getString("knowledge.dataset_id", "");
     }
 
+    public String getKnowledgeContent() {
+        return config.getString("knowledge.content", "Minecraft 相关内容");
+    }
+
     // 图像生成配置
     public boolean isImageGenerationEnabled() {
         return config.getBoolean("image_generation.enabled", false);

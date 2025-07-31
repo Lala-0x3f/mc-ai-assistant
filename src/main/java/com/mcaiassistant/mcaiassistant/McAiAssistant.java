@@ -49,7 +49,7 @@ public class McAiAssistant extends JavaPlugin {
         toastNotification = new ToastNotification(this);
 
         // 初始化速率限制管理器
-        rateLimitManager = new RateLimitManager(this);
+        rateLimitManager = new RateLimitManager(this, configManager);
 
         // 注册聊天监听器
         chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeApiClient, imageApiClient, toastNotification, rateLimitManager);
@@ -142,6 +142,12 @@ public class McAiAssistant extends JavaPlugin {
         configManager.loadConfig();
         aiApiClient.updateConfig(configManager);
         knowledgeApiClient.updateConfig(configManager);
+        rateLimitManager.updateConfig(configManager);
+        redisChatCompatibility.updateConfig(configManager);
+        // imageApiClient 也需要更新配置
+        if (imageApiClient != null) {
+            imageApiClient.updateConfig(configManager);
+        }
         getLogger().info("配置已重载");
     }
 }

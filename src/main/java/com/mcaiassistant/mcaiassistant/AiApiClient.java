@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
  * 负责与 OpenAI 格式的 API 进行通信
  */
 public class AiApiClient {
-    
+
     private final Gson gson;
     private OkHttpClient httpClient;
     private ConfigManager configManager;
@@ -34,7 +34,7 @@ public class AiApiClient {
         this.gson = new Gson();
         this.httpClient = createHttpClient();
     }
-    
+
     /**
      * 创建 HTTP 客户端
      */
@@ -51,8 +51,7 @@ public class AiApiClient {
         ConnectionPool connectionPool = new ConnectionPool(
                 configManager.getConnectionPoolMaxIdle(),
                 configManager.getConnectionKeepAliveDuration(),
-                TimeUnit.SECONDS
-        );
+                TimeUnit.SECONDS);
         clientBuilder.connectionPool(connectionPool);
 
         // 配置调度器（控制并发请求数）
@@ -86,7 +85,8 @@ public class AiApiClient {
                 Request.Builder requestBuilder = originalRequest.newBuilder()
                         .addHeader("DNT", "1")
                         .addHeader("Upgrade-Insecure-Requests", "1")
-                        .addHeader("Sec-Ch-Ua", "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"")
+                        .addHeader("Sec-Ch-Ua",
+                                "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"")
                         .addHeader("Sec-Ch-Ua-Mobile", "?0")
                         .addHeader("Sec-Ch-Ua-Platform", "\"Windows\"");
 
@@ -96,7 +96,7 @@ public class AiApiClient {
 
         return clientBuilder.build();
     }
-    
+
     /**
      * 更新配置
      */
@@ -104,7 +104,7 @@ public class AiApiClient {
         this.configManager = newConfigManager;
         this.httpClient = createHttpClient();
     }
-    
+
     /**
      * 发送消息到 AI API
      *
@@ -119,20 +119,21 @@ public class AiApiClient {
     /**
      * 发送消息到 AI API（带知识库信息）
      *
-     * @param message 用户消息
-     * @param context 上下文消息列表
+     * @param message       用户消息
+     * @param context       上下文消息列表
      * @param knowledgeInfo 知识库查询结果
      * @return AI 响应
      */
-    public String sendMessageWithKnowledge(String message, List<String> context, String knowledgeInfo) throws IOException {
+    public String sendMessageWithKnowledge(String message, List<String> context, String knowledgeInfo)
+            throws IOException {
         return sendMessage(message, context, false, knowledgeInfo);
     }
 
     /**
      * 发送消息到 AI API
      *
-     * @param message 用户消息
-     * @param context 上下文消息列表
+     * @param message  用户消息
+     * @param context  上下文消息列表
      * @param isSearch 是否为搜索请求
      * @return AI 响应
      */
@@ -143,13 +144,14 @@ public class AiApiClient {
     /**
      * 发送消息到 AI API
      *
-     * @param message 用户消息
-     * @param context 上下文消息列表
-     * @param isSearch 是否为搜索请求
+     * @param message       用户消息
+     * @param context       上下文消息列表
+     * @param isSearch      是否为搜索请求
      * @param knowledgeInfo 知识库信息
      * @return AI 响应
      */
-    public String sendMessage(String message, List<String> context, boolean isSearch, String knowledgeInfo) throws IOException {
+    public String sendMessage(String message, List<String> context, boolean isSearch, String knowledgeInfo)
+            throws IOException {
         // 构建请求体
         JsonObject requestBody = buildRequestBody(message, context, isSearch, knowledgeInfo);
 
@@ -163,18 +165,19 @@ public class AiApiClient {
         // 根据配置决定是否添加浏览器模拟请求头
         if (configManager.isSimulateBrowser()) {
             requestBuilder
-                .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                .addHeader("Accept", "application/json, text/plain, */*")
-                .addHeader("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-                // 移除 Accept-Encoding 让 OkHttp 自动处理压缩和解压缩
-                .addHeader("Connection", "keep-alive")
-                .addHeader("Sec-Fetch-Dest", "empty")
-                .addHeader("Sec-Fetch-Mode", "cors")
-                .addHeader("Sec-Fetch-Site", "same-origin")
-                .addHeader("Cache-Control", "no-cache")
-                .addHeader("Pragma", "no-cache")
-                .addHeader("Origin", configManager.getApiUrl())
-                .addHeader("Referer", configManager.getApiUrl() + "/");
+                    .addHeader("User-Agent",
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .addHeader("Accept", "application/json, text/plain, */*")
+                    .addHeader("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                    // 移除 Accept-Encoding 让 OkHttp 自动处理压缩和解压缩
+                    .addHeader("Connection", "keep-alive")
+                    .addHeader("Sec-Fetch-Dest", "empty")
+                    .addHeader("Sec-Fetch-Mode", "cors")
+                    .addHeader("Sec-Fetch-Site", "same-origin")
+                    .addHeader("Cache-Control", "no-cache")
+                    .addHeader("Pragma", "no-cache")
+                    .addHeader("Origin", configManager.getApiUrl())
+                    .addHeader("Referer", configManager.getApiUrl() + "/");
         }
 
         Request request = requestBuilder.build();
@@ -236,7 +239,7 @@ public class AiApiClient {
             return parseResponse(responseString);
         }
     }
-    
+
     /**
      * 构建 API 请求体
      */
@@ -310,27 +313,44 @@ public class AiApiClient {
     private String buildSystemPrompt(boolean isSearch, String knowledgeInfo) {
         String basePrompt = configManager.getSystemPrompt();
 
+        // 场景一：已经获取了知识库信息，任务是直接回答。
+        if (knowledgeInfo != null && !knowledgeInfo.trim().isEmpty()) {
+            basePrompt += "\n\n<useful_info>\n" + knowledgeInfo + "\n</useful_info>\n\n" +
+                    "重要：请你只根据以上提供的 <useful_info> 信息来回答用户的问题，不要再使用任何工具（如 query_knowledge 或 create_image）。";
+            return basePrompt;
+        }
+
+        // 场景二：没有知识库信息，AI 需要判断是否使用工具。
+        // 在此场景下，才添加所有可用的工具指令。
+
+        // 添加知识库查询工具指令
+        if (configManager.isKnowledgeEnabled()) {
+            String knowledgeInstructions = "\n\n # Document Search Tool \n 这个工具非常有用，可以搜索文档，当用户询问需要解答问题、询问到专业知识的时候，你必须在回复中立刻使用、禁止未查询就试图解答问题，系统会自动查询并根据文档向用户提供专业又详细的答案。\n" +
+                    "请分析用户真正的需求，哪怕和文档有一丝关联性也要查询。文档包括以下内容：" + configManager.getKnowledgeContent() + "\n\n" +
+                    "要使用 query_knowledge 工具，你需要在回复中添加一行：\n <query_knowledge query=\"用户问题关键词\" />\n\n" +
+                    "使用工具并回复用户：\"为了向你准确的答复，我需要查询XXX的文档，请稍等一会\" 结束！" +
+                    "示例：<query_knowledge query=\"中世纪教堂的结构以及mc中的做法\" />" +
+                    "可以搜索多个内容：<query_knowledge query=\"Axiom 有关曲线的工具和 Arceon 中制作拱门的指令\" />";
+            basePrompt += knowledgeInstructions;
+        }
+
+        // 添加图像生成工具指令
+        if (configManager.isImageGenerationEnabled()) {
+            basePrompt += "\n\n# Image Creation Tool \n 如果玩家要求画图，你要使用 create_image 给玩家生成参考图，每次响应只能使用一次\n" +
+                    "如果你要生成一张图像，请在响应中添加一行\n\n" +
+                    "<create_image prompt=\"\" alt=\"\" />\n\n" +
+                    "Prompt 必须是纯英语，否则无法生成，Prompt 不支持任何额外的配置参数\n" +
+                    "Alt 是图像的中文描述，用于在游戏中显示，应该简洁美观\n" +
+                    "需要格式完全准确，才能生成图像\n" +
+                    "使用工具并回复玩具一段话，建议这些画挂在哪或者怎么使用参考图，也可以单纯夸：\"这听起来太有创意了，我立刻帮你创作一张 XXX 的草稿，你可以把它...\" " +
+                    "示例：<create_image prompt=\"beautiful sunset over mountains\" alt=\"美丽的山间日落\" />";
+        }
+
+        // 添加搜索特定指令
         if (isSearch) {
             basePrompt += "\n\n特别注意：这是一个网络搜索请求。请使用你的搜索能力来获取最新的信息，并提供准确、及时的答案。";
         }
-
-        // 如果有知识库信息，添加到系统提示词中
-        if (knowledgeInfo != null && !knowledgeInfo.trim().isEmpty()) {
-            basePrompt += "\n\n<useful_info>\n" + knowledgeInfo + "\n</useful_info>\n\n" +
-                         "以上是从知识库中查询到的相关信息，请结合这些信息来回答用户的问题。如果知识库信息与问题相关，请优先使用这些信息。";
-        }
-
-        // 如果启用了图像生成功能，添加图像生成指令
-        if (configManager.isImageGenerationEnabled()) {
-            basePrompt += "\n\n如果玩家要求画图，你要使用 create_image 给玩家生成参考图，每次响应只能使用一次\n" +
-                         "如果你要生成一张图像，请在响应中添加一行\n\n" +
-                         "<create_image prompt=\"\" alt=\"\" />\n\n" +
-                         "Prompt 必须是纯英语，否则无法生成，Prompt 不支持任何额外的配置参数\n" +
-                         "Alt 是图像的中文描述，用于在游戏中显示，应该简洁美观\n" +
-                         "需要格式完全准确，才能生成图像\n" +
-                         "示例：<create_image prompt=\"beautiful sunset over mountains\" alt=\"美丽的山间日落\" />";
-        }
-
+        
         return basePrompt;
     }
 
@@ -376,9 +396,8 @@ public class AiApiClient {
             // 添加响应头信息
             if (configManager.isDebugMode()) {
                 errorDetails.append("\n响应头信息:");
-                response.headers().forEach(pair ->
-                    errorDetails.append("\n  ").append(pair.getFirst()).append(": ").append(pair.getSecond())
-                );
+                response.headers().forEach(pair -> errorDetails.append("\n  ").append(pair.getFirst()).append(": ")
+                        .append(pair.getSecond()));
             }
 
             // 获取错误响应体

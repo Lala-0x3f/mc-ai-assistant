@@ -17,8 +17,8 @@ import java.util.concurrent.TimeUnit;
  */
 public class ImageApiClient {
     private final JavaPlugin plugin;
-    private final ConfigManager configManager;
-    private final OkHttpClient httpClient;
+    private ConfigManager configManager;
+    private OkHttpClient httpClient;
     private final Gson gson;
 
     public ImageApiClient(JavaPlugin plugin, ConfigManager configManager) {
@@ -188,5 +188,12 @@ public class ImageApiClient {
             httpClient.dispatcher().executorService().shutdown();
             httpClient.connectionPool().evictAll();
         }
+    }
+    /**
+     * 更新配置
+     */
+    public void updateConfig(ConfigManager newConfigManager) {
+        this.configManager = newConfigManager;
+        // 注意：如果 httpClient 的配置也依赖于 configManager，这里也需要重新创建 httpClient
     }
 }

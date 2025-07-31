@@ -14,14 +14,21 @@ import java.util.concurrent.ConcurrentHashMap;
 public class RateLimitManager {
 
     private final McAiAssistant plugin;
-    private final ConfigManager configManager;
+    private ConfigManager configManager;
     
     // 存储每个玩家的请求时间戳
     private final Map<UUID, RequestHistory> playerRequests = new ConcurrentHashMap<>();
 
-    public RateLimitManager(McAiAssistant plugin) {
+    public RateLimitManager(McAiAssistant plugin, ConfigManager configManager) {
         this.plugin = plugin;
-        this.configManager = plugin.getConfigManager();
+        this.configManager = configManager;
+    }
+
+    /**
+     * 更新配置
+     */
+    public void updateConfig(ConfigManager newConfigManager) {
+        this.configManager = newConfigManager;
     }
 
     /**

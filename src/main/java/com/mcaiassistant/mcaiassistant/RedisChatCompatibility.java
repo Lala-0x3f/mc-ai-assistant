@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
 public class RedisChatCompatibility implements Listener {
     
     private final McAiAssistant plugin;
-    private final ConfigManager configManager;
+    private ConfigManager configManager;
     private final ChatHistoryManager chatHistoryManager;
     private final AiApiClient aiApiClient;
     private final SearchApiClient searchApiClient;
@@ -239,7 +239,7 @@ public class RedisChatCompatibility implements Listener {
      */
     private void handleRedisChatAiRequest(Player player, String message) {
         // 清理消息，移除 @ai 标记
-        String cleanMessage = chatListener.cleanMessage(message);
+        final String cleanMessage = chatListener.cleanMessage(message);
 
         if (configManager.isDebugMode()) {
             plugin.getLogger().info("处理 RedisChat AI 请求: " + player.getName() + " -> " + cleanMessage);
@@ -274,7 +274,7 @@ public class RedisChatCompatibility implements Listener {
         }).thenAccept(response -> {
             // 在主线程中发送响应
             Bukkit.getScheduler().runTask(plugin, () -> {
-                chatListener.sendAiResponse(response, player);
+                chatListener.sendAiResponse(response, player, cleanMessage);
             });
         });
     }
@@ -378,5 +378,12 @@ public class RedisChatCompatibility implements Listener {
      */
     public boolean isRedisChatEnabled() {
         return redisChatEnabled;
+    }
+
+    /**
+     * 更新配置
+     */
+    public void updateConfig(ConfigManager newConfigManager) {
+        this.configManager = newConfigManager;
     }
 }

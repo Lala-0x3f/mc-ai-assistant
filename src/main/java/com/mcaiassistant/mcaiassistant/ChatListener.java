@@ -15,6 +15,7 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -41,8 +42,8 @@ public class ChatListener implements Listener {
     private static final Pattern SMART_AI_PATTERN = Pattern.compile("(?:^|\\s)@ai(?:\\s|$|[^a-zA-Z])", Pattern.CASE_INSENSITIVE);
     private static final Pattern SMART_SEARCH_PATTERN = Pattern.compile("(?:^|\\s)@search(?:\\s|$|[^a-zA-Z])", Pattern.CASE_INSENSITIVE);
 
-    // 用于跟踪已处理的消息，避免重复处理
-    private final Set<String> processedMessages = ConcurrentHashMap.newKeySet();
+    // 用于跟踪已处理的消息，避免重复处理（存储消息ID和时间戳）
+    private final Map<String, Long> processedMessages = new ConcurrentHashMap<>();
     
     public ChatListener(McAiAssistant plugin, ConfigManager configManager,
                        ChatHistoryManager chatHistoryManager, AiApiClient aiApiClient,
@@ -72,8 +73,11 @@ public class ChatListener implements Listener {
         // 创建消息唯一标识符，避免重复处理
         String messageId = player.getName() + ":" + message + ":" + System.currentTimeMillis();
 
+        // 清理过期的消息记录（例如，超过60秒）
+        cleanupProcessedMessages();
+
         // 检查是否已经处理过这条消息
-        if (processedMessages.contains(messageId)) {
+        if (processedMessages.containsKey(messageId)) {
             if (configManager.isDebugMode()) {
                 plugin.getLogger().info("消息已被处理，跳过: " + messageId);
             }
@@ -92,12 +96,7 @@ public class ChatListener implements Listener {
             }
 
             // 标记消息为已处理
-            processedMessages.add(messageId);
-
-            // 清理过期的消息ID（保留最近1000条）
-            if (processedMessages.size() > 1000) {
-                processedMessages.clear();
-            }
+            processedMessages.put(messageId, System.currentTimeMillis());
 
             // 检查权限
             if (!hasPermission(player)) {
@@ -130,12 +129,7 @@ public class ChatListener implements Listener {
             }
 
             // 标记消息为已处理
-            processedMessages.add(messageId);
-
-            // 清理过期的消息ID（保留最近1000条）
-            if (processedMessages.size() > 1000) {
-                processedMessages.clear();
-            }
+            processedMessages.put(messageId, System.currentTimeMillis());
 
             // 检查权限
             if (!hasPermission(player)) {
@@ -195,12 +189,7 @@ public class ChatListener implements Listener {
      */
     public void markMessageAsProcessed(Player player, String message) {
         String messageId = player.getName() + ":" + message + ":" + System.currentTimeMillis();
-        processedMessages.add(messageId);
-
-        // 清理过期的消息ID（保留最近1000条）
-        if (processedMessages.size() > 1000) {
-            processedMessages.clear();
-        }
+        processedMessages.put(messageId, System.currentTimeMillis());
 
         if (configManager.isDebugMode()) {
             plugin.getLogger().info("消息已标记为已处理: " + messageId);
@@ -212,7 +201,7 @@ public class ChatListener implements Listener {
      */
     private void handleAiRequest(Player player, String message) {
         // 清理消息，移除 @ai 标记
-        String cleanMessage = cleanMessage(message);
+        final String cleanMessage = cleanMessage(message);
 
         if (configManager.isDebugMode()) {
             plugin.getLogger().info("处理 AI 请求: " + player.getName() + " -> " + cleanMessage);
@@ -228,24 +217,6 @@ public class ChatListener implements Listener {
                     plugin.getLogger().info("开始处理 AI 请求，清理后的消息: " + cleanMessage);
                 }
 
-                // 先查询知识库
-                String knowledgeInfo = null;
-                try {
-                    knowledgeInfo = knowledgeApiClient.queryKnowledge(cleanMessage);
-                    if (configManager.isDebugMode()) {
-                        if (knowledgeInfo != null) {
-                            plugin.getLogger().info("知识库查询成功，获得相关信息长度: " + knowledgeInfo.length());
-                        } else {
-                            plugin.getLogger().info("知识库查询无结果或未启用");
-                        }
-                    }
-                } catch (Exception e) {
-                    if (configManager.isDebugMode()) {
-                        plugin.getLogger().warning("知识库查询失败: " + e.getMessage());
-                    }
-                    // 知识库查询失败不影响正常AI对话，继续处理
-                }
-
                 // 获取上下文消息
                 List<String> context = configManager.isContextEnabled() ?
                     chatHistoryManager.getRecentMessages(configManager.getContextMessages()) : null;
@@ -254,8 +225,8 @@ public class ChatListener implements Listener {
                     plugin.getLogger().info("AI 请求上下文消息数量: " + context.size());
                 }
 
-                // 调用 AI API，传递知识库信息
-                return aiApiClient.sendMessageWithKnowledge(cleanMessage, context, knowledgeInfo);
+                // 调用 AI API（不再自动查询知识库）
+                return aiApiClient.sendMessage(cleanMessage, context);
             } catch (Exception e) {
                 plugin.getLogger().severe("AI API 调用失败: " + e.getMessage());
                 if (configManager.isDebugMode()) {
@@ -270,7 +241,7 @@ public class ChatListener implements Listener {
                 if (configManager.isDebugMode()) {
                     plugin.getLogger().info("AI 请求处理完成，响应长度: " + (response != null ? response.length() : 0));
                 }
-                sendAiResponse(response, player);
+                sendAiResponse(response, player, cleanMessage);
             });
         });
     }
@@ -296,13 +267,28 @@ public class ChatListener implements Listener {
      * 发送 AI 响应到聊天
      */
     public void sendAiResponse(String response) {
-        sendAiResponse(response, null);
+        sendAiResponse(response, null, null);
     }
 
     /**
      * 发送 AI 响应到聊天（带玩家信息用于图像生成）
      */
-    public void sendAiResponse(String response, Player requestPlayer) {
+    public void sendAiResponse(String response, Player requestPlayer, String originalMessage) {
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[响应处理] 📥 收到 AI 响应，开始处理");
+            if (response != null) {
+                plugin.getLogger().info("[响应处理] 响应长度: " + response.length() + " 字符");
+                if (response.length() < 500) {
+                    plugin.getLogger().info("[响应处理] 完整响应内容: " + response);
+                } else {
+                    plugin.getLogger().info("[响应处理] 响应内容预览: " + response.substring(0, 500) + "...");
+                }
+            } else {
+                plugin.getLogger().warning("[响应处理] ❌ 收到空响应");
+                return;
+            }
+        }
+
         if (response == null || response.trim().isEmpty()) {
             return;
         }
@@ -310,37 +296,48 @@ public class ChatListener implements Listener {
         String aiName = configManager.getAiName();
         String aiPrefix = configManager.getAiPrefix();
 
-        // 处理图像生成（如果有请求玩家）
-        if (requestPlayer != null) {
-            processImageGeneration(requestPlayer, response);
-        }
+        // 1. 移除所有工具标签，获取纯文本响应
+        String cleanResponse = removeImageTags(removeKnowledgeTags(response));
 
-        // 移除图像生成标签后再显示文本响应
-        String cleanResponse = removeImageTags(response);
-
-        if (cleanResponse.trim().isEmpty()) {
-            // 如果移除标签后没有文本内容，只记录到历史但不显示
-            if (configManager.isChatLoggingEnabled()) {
-                chatHistoryManager.addMessage(aiName, response);
+        // 2. 如果有纯文本内容，立即发送
+        if (!cleanResponse.trim().isEmpty()) {
+            String formattedMessage = ChatColor.AQUA + aiPrefix + ChatColor.WHITE + cleanResponse;
+            Bukkit.broadcastMessage(formattedMessage);
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[响应处理] ✅ 已发送纯文本内容: " + cleanResponse);
             }
-            return;
         }
 
-        // 格式化 AI 响应消息
-        String formattedMessage = ChatColor.AQUA + aiPrefix + ChatColor.WHITE + cleanResponse;
-
-        // 广播消息给所有在线玩家
-        Bukkit.broadcastMessage(formattedMessage);
-
-        // 记录 AI 响应到聊天历史
+        // 3. 记录完整的原始响应到历史记录（如果启用）
         if (configManager.isChatLoggingEnabled()) {
             chatHistoryManager.addMessage(aiName, response);
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[响应处理] 📝 已将原始响应记录到历史");
+            }
         }
 
-        if (configManager.isDebugMode()) {
-            plugin.getLogger().info("AI 响应: " + cleanResponse);
-            plugin.getLogger().info("AI 前缀: '" + aiPrefix + "'");
-            plugin.getLogger().info("格式化消息: " + formattedMessage);
+        // 4. 处理知识库查询（如果存在）
+        if (requestPlayer != null && configManager.isKnowledgeEnabled() && response.contains("<query_knowledge")) {
+            Pattern knowledgePattern = Pattern.compile("<query_knowledge\\s+query=\"([^\"]+)\"\\s*/>");
+            Matcher matcher = knowledgePattern.matcher(response);
+            if (matcher.find()) {
+                if (configManager.isDebugMode()) {
+                    plugin.getLogger().info("[响应处理] 🔍 检测到知识库查询标签，开始处理...");
+                }
+                // 告诉用户正在查询知识库
+                String waitingMessage = ChatColor.AQUA + aiPrefix + ChatColor.YELLOW + "正在查询知识库获取更准确的信息，请稍候...";
+                Bukkit.broadcastMessage(waitingMessage);
+                processKnowledgeQuery(requestPlayer, response, originalMessage);
+                // 注意：这里不再 return，允许后续的图像生成等工具继续执行（如果需要）
+            }
+        }
+
+        // 5. 处理图像生成（如果存在）
+        if (requestPlayer != null && configManager.isImageGenerationEnabled() && response.contains("<create_image")) {
+             if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[响应处理] 🎨 检测到图像生成标签，开始处理...");
+            }
+            processImageGeneration(requestPlayer, response);
         }
     }
 
@@ -598,6 +595,7 @@ public class ChatListener implements Listener {
                             .append(Component.text(aiPrefix, NamedTextColor.AQUA))
                             .append(Component.text("🎨 ", NamedTextColor.GOLD))
                             .append(Component.text("图像生成完成！", NamedTextColor.GREEN))
+                                .hoverEvent(HoverEvent.showText(Component.text(" (由 " + player.getName() + " 生成)", NamedTextColor.GRAY)))
                             .append(Component.text("\n📝 ", NamedTextColor.GRAY))
                             .append(Component.text(imageAlt, NamedTextColor.WHITE)
                                 .hoverEvent(HoverEvent.showText(Component.text("原始 Prompt: " + prompt, NamedTextColor.GRAY))))
@@ -624,7 +622,7 @@ public class ChatListener implements Listener {
                         }
 
                         Component imageMessage = messageBuilder.build();
-                        player.sendMessage(imageMessage);
+                        Bukkit.broadcast(imageMessage);
 
                         if (configManager.isDebugMode()) {
                             plugin.getLogger().info("[图像生成] 成功生成 " + images.size() + " 张图像，用时: " + duration + "ms");
@@ -642,11 +640,11 @@ public class ChatListener implements Listener {
                         Component errorMessage = Component.text()
                             .append(Component.text(aiPrefix, NamedTextColor.AQUA))
                             .append(Component.text("❌ ", NamedTextColor.RED))
-                            .append(Component.text("图像生成失败: ", NamedTextColor.RED))
+                            .append(Component.text("图像生成失败 (请求者: " + player.getName() + "): ", NamedTextColor.RED))
                             .append(Component.text(errorMsg, NamedTextColor.GRAY))
                             .build();
 
-                        player.sendMessage(errorMessage);
+                        Bukkit.broadcast(errorMessage);
 
                         if (configManager.isDebugMode()) {
                             plugin.getLogger().warning("[图像生成] 生成失败: " + errorMsg);
@@ -661,11 +659,11 @@ public class ChatListener implements Listener {
                     Component errorMessage = Component.text()
                         .append(Component.text(aiPrefix, NamedTextColor.AQUA))
                         .append(Component.text("❌ ", NamedTextColor.RED))
-                        .append(Component.text("图像生成异常: ", NamedTextColor.RED))
+                        .append(Component.text("图像生成异常 (请求者: " + player.getName() + "): ", NamedTextColor.RED))
                         .append(Component.text(throwable.getMessage(), NamedTextColor.GRAY))
                         .build();
 
-                    player.sendMessage(errorMessage);
+                    Bukkit.broadcast(errorMessage);
                 });
 
                 if (configManager.isDebugMode()) {
@@ -693,5 +691,249 @@ public class ChatListener implements Listener {
         result = oldImagePattern.matcher(result).replaceAll("").trim();
 
         return result;
+    }
+
+    /**
+     * 处理知识库查询标签
+     */
+    private void processKnowledgeQuery(Player player, String response, final String cleanMessage) {
+        if (!configManager.isKnowledgeEnabled()) {
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[知识库查询] 知识库功能未启用，跳过处理");
+            }
+            return;
+        }
+
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[知识库查询] 开始检查响应中的知识库查询标签");
+            plugin.getLogger().info("[知识库查询] 响应内容长度: " + response.length());
+            if (response.length() < 500) {
+                plugin.getLogger().info("[知识库查询] 完整响应内容: " + response);
+            } else {
+                plugin.getLogger().info("[知识库查询] 响应内容预览: " + response.substring(0, 500) + "...");
+            }
+        }
+
+        // 检查响应中是否包含知识库查询标签
+        Pattern knowledgePattern = Pattern.compile("<query_knowledge\\s+query=\"([^\"]+)\"\\s*/>");
+        Matcher matcher = knowledgePattern.matcher(response);
+
+        if (matcher.find()) {
+            final String query = matcher.group(1);
+
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[知识库查询] ✅ 检测到知识库查询请求");
+                plugin.getLogger().info("[知识库查询] 查询内容: " + query);
+                plugin.getLogger().info("[知识库查询] 请求玩家: " + player.getName());
+                plugin.getLogger().info("[知识库查询] 知识库配置内容: " + configManager.getKnowledgeContent());
+                plugin.getLogger().info("[知识库查询] 开始异步查询知识库...");
+            }
+
+            // 异步查询知识库并重新请求 AI
+            CompletableFuture.supplyAsync(() -> {
+                long startTime = System.currentTimeMillis();
+
+                if (configManager.isDebugMode()) {
+                    plugin.getLogger().info("[知识库查询] 🔍 开始调用知识库 API");
+                    plugin.getLogger().info("[知识库查询] API URL: " + configManager.getKnowledgeApiUrl());
+                }
+
+                try {
+                    // 查询知识库
+                    String knowledgeInfo = knowledgeApiClient.queryKnowledge(query);
+
+                    long duration = System.currentTimeMillis() - startTime;
+
+                    if (configManager.isDebugMode()) {
+                        if (knowledgeInfo != null) {
+                            plugin.getLogger().info("[知识库查询] ✅ 查询成功，用时: " + duration + "ms");
+                            plugin.getLogger().info("[知识库查询] 获得相关信息长度: " + knowledgeInfo.length() + " 字符");
+                            if (knowledgeInfo.length() < 200) {
+                                plugin.getLogger().info("[知识库查询] 完整知识库内容: " + knowledgeInfo);
+                            } else {
+                                plugin.getLogger().info("[知识库查询] 知识库内容预览: " + knowledgeInfo.substring(0, 200) + "...");
+                            }
+                        } else {
+                            plugin.getLogger().info("[知识库查询] ❌ 查询无结果，用时: " + duration + "ms");
+                        }
+                    }
+
+                    return knowledgeInfo;
+                } catch (Exception e) {
+                    long duration = System.currentTimeMillis() - startTime;
+                    if (configManager.isDebugMode()) {
+                        plugin.getLogger().warning("[知识库查询] ❌ 查询失败，用时: " + duration + "ms");
+                        plugin.getLogger().warning("[知识库查询] 错误详情: " + e.getMessage());
+                        plugin.getLogger().warning("[知识库查询] 异常类型: " + e.getClass().getSimpleName());
+                        if (e.getCause() != null) {
+                            plugin.getLogger().warning("[知识库查询] 根本原因: " + e.getCause().getMessage());
+                        }
+                    }
+                    return null;
+                }
+            }).thenAccept(knowledgeInfo -> {
+                // 在主线程中处理结果
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    long aiStartTime = System.currentTimeMillis();
+
+                    if (configManager.isDebugMode()) {
+                        plugin.getLogger().info("[知识库查询] 🔄 开始处理知识库查询结果");
+                        plugin.getLogger().info("[知识库查询] 知识库信息是否为空: " + (knowledgeInfo == null ? "是" : "否"));
+                    }
+
+                    try {
+                        if (configManager.isDebugMode()) {
+                            plugin.getLogger().info("[知识库查询] 使用传入的原始消息: " + cleanMessage);
+                        }
+
+                        // 构建工具调用响应格式
+                        List<String> context = configManager.isContextEnabled() ?
+                            chatHistoryManager.getRecentMessages(configManager.getContextMessages()) : null;
+
+                        if (configManager.isDebugMode()) {
+                            plugin.getLogger().info("[知识库查询] 上下文消息数量: " + (context != null ? context.size() : 0));
+                            plugin.getLogger().info("[知识库查询] 🤖 开始调用 AI API 生成最终回答...");
+                        }
+
+                        // 使用知识库信息重新请求 AI
+                        String finalResponse = aiApiClient.sendMessageWithKnowledge(cleanMessage, context, knowledgeInfo);
+
+                        long aiDuration = System.currentTimeMillis() - aiStartTime;
+
+                        if (configManager.isDebugMode()) {
+                            plugin.getLogger().info("[知识库查询] AI API 调用完成，用时: " + aiDuration + "ms");
+                            if (finalResponse != null) {
+                                plugin.getLogger().info("[知识库查询] 最终响应长度: " + finalResponse.length() + " 字符");
+                                if (finalResponse.length() < 300) {
+                                    plugin.getLogger().info("[知识库查询] 完整最终响应: " + finalResponse);
+                                } else {
+                                    plugin.getLogger().info("[知识库查询] 最终响应预览: " + finalResponse.substring(0, 300) + "...");
+                                }
+                            } else {
+                                plugin.getLogger().warning("[知识库查询] ❌ AI 返回了空响应");
+                            }
+                        }
+
+                        if (finalResponse != null && !finalResponse.trim().isEmpty()) {
+                            // 发送最终响应（不再处理标签，避免无限循环）
+                            sendFinalAiResponse(finalResponse);
+
+                            if (configManager.isDebugMode()) {
+                                plugin.getLogger().info("[知识库查询] ✅ 知识库查询流程完成");
+                            }
+                        } else {
+                            if (configManager.isDebugMode()) {
+                                plugin.getLogger().warning("[知识库查询] ❌ 最终响应为空，跳过发送");
+                            }
+                        }
+                    } catch (Exception e) {
+                        if (configManager.isDebugMode()) {
+                            plugin.getLogger().warning("[知识库查询] 处理最终响应失败: " + e.getMessage());
+                        }
+                    }
+                });
+            });
+        }
+    }
+
+    /**
+     * 发送最终 AI 响应（不处理标签）
+     */
+    private void sendFinalAiResponse(String response) {
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[知识库查询] 📤 准备发送最终 AI 响应");
+        }
+
+        if (response == null || response.trim().isEmpty()) {
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().warning("[知识库查询] ❌ 响应为空，取消发送");
+            }
+            return;
+        }
+
+        // 移除知识库查询标签
+        String cleanResponse = removeKnowledgeTags(response);
+
+        String aiName = configManager.getAiName();
+        String aiPrefix = configManager.getAiPrefix();
+
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[知识库查询] AI 名称: " + aiName);
+            plugin.getLogger().info("[知识库查询] AI 前缀: " + aiPrefix);
+            plugin.getLogger().info("[知识库查询] 原始响应长度: " + response.length() + " 字符");
+            plugin.getLogger().info("[知识库查询] 清理后响应长度: " + cleanResponse.length() + " 字符");
+        }
+
+        // 格式化 AI 响应消息
+        String formattedMessage = ChatColor.AQUA + aiPrefix + ChatColor.WHITE + cleanResponse;
+
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[知识库查询] 格式化后消息长度: " + formattedMessage.length() + " 字符");
+            plugin.getLogger().info("[知识库查询] 📢 广播消息给所有在线玩家");
+        }
+
+        // 广播消息给所有在线玩家
+        Bukkit.broadcastMessage(formattedMessage);
+
+        // 记录到聊天历史
+        if (configManager.isChatLoggingEnabled()) {
+            chatHistoryManager.addMessage(aiName, cleanResponse);
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[知识库查询] ✅ 已记录到聊天历史");
+            }
+        } else {
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[知识库查询] 聊天日志功能未启用，跳过记录");
+            }
+        }
+
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[知识库查询] ✅ 最终 AI 响应发送完成");
+            plugin.getLogger().info("[知识库查询] 清理后响应内容: " + cleanResponse);
+        }
+    }
+
+    /**
+     * 移除响应中的知识库查询标签
+     */
+    private String removeKnowledgeTags(String response) {
+        if (!configManager.isKnowledgeEnabled()) {
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[知识库查询] 知识库功能未启用，跳过标签移除");
+            }
+            return response;
+        }
+
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[知识库查询] 🏷️ 开始移除知识库查询标签");
+            plugin.getLogger().info("[知识库查询] 原始响应长度: " + response.length() + " 字符");
+        }
+
+        // 移除知识库查询标签
+        Pattern knowledgePattern = Pattern.compile("<query_knowledge\\s+query=\"[^\"]+\"\\s*/>");
+        Matcher matcher = knowledgePattern.matcher(response);
+
+        boolean foundTags = matcher.find();
+        String result = knowledgePattern.matcher(response).replaceAll("").trim();
+
+        if (configManager.isDebugMode()) {
+            if (foundTags) {
+                plugin.getLogger().info("[知识库查询] ✅ 发现并移除了知识库查询标签");
+                plugin.getLogger().info("[知识库查询] 移除后响应长度: " + result.length() + " 字符");
+                plugin.getLogger().info("[知识库查询] 长度变化: " + (response.length() - result.length()) + " 字符");
+            } else {
+                plugin.getLogger().info("[知识库查询] ❌ 未发现知识库查询标签");
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * 清理过期的已处理消息记录
+     */
+    private void cleanupProcessedMessages() {
+        long expirationTime = System.currentTimeMillis() - 60000; // 60秒前
+        processedMessages.entrySet().removeIf(entry -> entry.getValue() < expirationTime);
     }
 }
