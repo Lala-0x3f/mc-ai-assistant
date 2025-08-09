@@ -772,52 +772,43 @@ public class ChatListener implements Listener {
                     return null;
                 }
             }).thenAccept(knowledgeInfo -> {
-                // 在主线程中处理结果
-                Bukkit.getScheduler().runTask(plugin, () -> {
+                // 在异步线程中调用 AI API，避免阻塞主线程
+                CompletableFuture.supplyAsync(() -> {
                     long aiStartTime = System.currentTimeMillis();
-
-                    if (configManager.isDebugMode()) {
-                        plugin.getLogger().info("[知识库查询] 🔄 开始处理知识库查询结果");
-                        plugin.getLogger().info("[知识库查询] 知识库信息是否为空: " + (knowledgeInfo == null ? "是" : "否"));
-                    }
-
                     try {
                         if (configManager.isDebugMode()) {
+                            plugin.getLogger().info("[知识库查询] 🔄 开始处理知识库查询结果");
+                            plugin.getLogger().info("[知识库查询] 知识库信息是否为空: " + (knowledgeInfo == null ? "是" : "否"));
                             plugin.getLogger().info("[知识库查询] 使用传入的原始消息: " + cleanMessage);
                         }
-
-                        // 构建工具调用响应格式
                         List<String> context = configManager.isContextEnabled() ?
                             chatHistoryManager.getRecentMessages(configManager.getContextMessages()) : null;
-
                         if (configManager.isDebugMode()) {
                             plugin.getLogger().info("[知识库查询] 上下文消息数量: " + (context != null ? context.size() : 0));
                             plugin.getLogger().info("[知识库查询] 🤖 开始调用 AI API 生成最终回答...");
                         }
-
-                        // 使用知识库信息重新请求 AI
                         String finalResponse = aiApiClient.sendMessageWithKnowledge(cleanMessage, context, knowledgeInfo);
-
                         long aiDuration = System.currentTimeMillis() - aiStartTime;
-
                         if (configManager.isDebugMode()) {
                             plugin.getLogger().info("[知识库查询] AI API 调用完成，用时: " + aiDuration + "ms");
                             if (finalResponse != null) {
                                 plugin.getLogger().info("[知识库查询] 最终响应长度: " + finalResponse.length() + " 字符");
-                                if (finalResponse.length() < 300) {
-                                    plugin.getLogger().info("[知识库查询] 完整最终响应: " + finalResponse);
-                                } else {
-                                    plugin.getLogger().info("[知识库查询] 最终响应预览: " + finalResponse.substring(0, 300) + "...");
-                                }
                             } else {
                                 plugin.getLogger().warning("[知识库查询] ❌ AI 返回了空响应");
                             }
                         }
-
+                        return finalResponse;
+                    } catch (Exception e) {
+                        if (configManager.isDebugMode()) {
+                            plugin.getLogger().warning("[知识库查询] 处理最终响应失败: " + e.getMessage());
+                        }
+                        return null;
+                    }
+                }).thenAccept(finalResponse -> {
+                    // 回到主线程发送响应
+                    Bukkit.getScheduler().runTask(plugin, () -> {
                         if (finalResponse != null && !finalResponse.trim().isEmpty()) {
-                            // 发送最终响应（不再处理标签，避免无限循环）
                             sendFinalAiResponse(finalResponse);
-
                             if (configManager.isDebugMode()) {
                                 plugin.getLogger().info("[知识库查询] ✅ 知识库查询流程完成");
                             }
@@ -826,11 +817,7 @@ public class ChatListener implements Listener {
                                 plugin.getLogger().warning("[知识库查询] ❌ 最终响应为空，跳过发送");
                             }
                         }
-                    } catch (Exception e) {
-                        if (configManager.isDebugMode()) {
-                            plugin.getLogger().warning("[知识库查询] 处理最终响应失败: " + e.getMessage());
-                        }
-                    }
+                    });
                 });
             });
         }

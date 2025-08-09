@@ -261,6 +261,9 @@ public class RedisChatCompatibility implements Listener {
         }).thenCompose(context -> {
             return CompletableFuture.supplyAsync(() -> {
                 try {
+                    if (Bukkit.isPrimaryThread() && configManager.isDebugMode()) {
+                        plugin.getLogger().warning("警告: 尝试在主线程调用 aiApiClient.sendMessage，这会导致卡顿");
+                    }
                     return aiApiClient.sendMessage(cleanMessage, context);
                 } catch (Exception e) {
                     plugin.getLogger().severe("RedisChat AI API 调用失败: " + e.getMessage());
