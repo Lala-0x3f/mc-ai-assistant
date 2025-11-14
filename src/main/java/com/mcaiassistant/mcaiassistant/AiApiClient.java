@@ -26,10 +26,12 @@ public class AiApiClient {
     private final Gson gson;
     private OkHttpClient httpClient;
     private ConfigManager configManager;
+    private final ModelManager modelManager;
     private final McAiAssistant plugin;
-
-    public AiApiClient(ConfigManager configManager) {
+ 
+    public AiApiClient(ConfigManager configManager, ModelManager modelManager) {
         this.configManager = configManager;
+        this.modelManager = modelManager;
         this.plugin = McAiAssistant.getInstance();
         this.gson = new Gson();
         this.httpClient = createHttpClient();
@@ -259,9 +261,9 @@ public class AiApiClient {
      */
     private JsonObject buildRequestBody(String message, List<String> context, boolean isSearch, String knowledgeInfo) {
         JsonObject requestBody = new JsonObject();
-
+ 
         // 根据是否为搜索请求选择模型
-        String model = isSearch ? configManager.getSearchModel() : configManager.getModel();
+        String model = isSearch ? configManager.getSearchModel() : modelManager.getEffectiveChatModel();
         requestBody.addProperty("model", model);
         requestBody.addProperty("max_tokens", configManager.getMaxTokens());
         requestBody.addProperty("temperature", configManager.getTemperature());

@@ -12,6 +12,7 @@ public class McAiAssistant extends JavaPlugin {
     
     private static McAiAssistant instance;
     private ConfigManager configManager;
+    private ModelManager modelManager;
     private ChatListener chatListener;
     private ChatHistoryManager chatHistoryManager;
     private AiApiClient aiApiClient;
@@ -29,13 +30,18 @@ public class McAiAssistant extends JavaPlugin {
         // 初始化配置管理器
         configManager = new ConfigManager(this);
         configManager.loadConfig();
+
+        // 初始化模型管理器（运行时覆盖 + /models 缓存）
+        modelManager = new ModelManager(this, configManager);
+        // 异步预取一次模型列表，供后续补全使用
+        modelManager.refreshModelsAsync();
         
         // 初始化聊天记录管理器
         chatHistoryManager = new ChatHistoryManager();
         
         // 初始化 AI API 客户端
-        aiApiClient = new AiApiClient(configManager);
-
+        aiApiClient = new AiApiClient(configManager, modelManager);
+ 
         // 初始化搜索 API 客户端
         searchApiClient = new SearchApiClient(configManager);
 
@@ -55,6 +61,15 @@ public class McAiAssistant extends JavaPlugin {
         chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeApiClient, imageApiClient, toastNotification, rateLimitManager);
         getServer().getPluginManager().registerEvents(chatListener, this);
 
+        // 注册 /model 指令与补全
+        if (getCommand("model") != null) {
+            ModelCommand modelCommand = new ModelCommand(this, configManager, modelManager);
+            getCommand("model").setExecutor(modelCommand);
+            getCommand("model").setTabCompleter(modelCommand);
+        } else {
+            getLogger().warning("未在 plugin.yml 中找到 model 指令定义，/model 无法注册");
+        }
+ 
         // 初始化 RedisChat 兼容性
         redisChatCompatibility = new RedisChatCompatibility(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, chatListener, toastNotification);
         
@@ -140,6 +155,10 @@ public class McAiAssistant extends JavaPlugin {
      */
     public void reloadPluginConfig() {
         configManager.loadConfig();
+        // 更新 ModelManager 与各客户端配置
+        if (modelManager != null) {
+            modelManager.updateConfig(configManager);
+        }
         aiApiClient.updateConfig(configManager);
         knowledgeApiClient.updateConfig(configManager);
         rateLimitManager.updateConfig(configManager);

@@ -399,3 +399,53 @@ features:
 - 适当调整 `context_messages` 数量
 - 在高负载服务器上考虑禁用 `enable_chat_logging`
 - 生产环境中关闭 `debug_mode`
+
+## 模型切换与 /model 指令
+
+通过一个简单的指令即可在运行时切换聊天使用的 AI 模型。默认模型仍取自配置文件 `ai.model`，未设置覆盖时生效。
+
+### 快速使用
+
+- 查看当前“有效模型”（及来源：覆盖/配置）
+  ```
+  /model
+  ```
+- 切换到指定模型
+  ```
+  /model <modelId>
+  ```
+  示例：
+  ```
+  /model gpt-4o-mini
+  /model o4-mini
+  /model llama-3.1-8b-instruct
+  ```
+
+说明：
+- 切换为“运行时覆盖”，仅影响聊天用模型；
+- 重载或重启后将回到配置默认模型（不写回配置）；
+
+### 自动补全（动态模型列表）
+
+- 输入 `/model ` 后，Tab 自动补全候选来自 OpenAI 风格的 `/models` 接口；
+- 列表缓存默认 10 分钟，首次或过期会异步刷新，不阻塞主线程；
+- 如果 `/models` 接口不可用或返回不全，仍允许设置任意 `modelId`，并在聊天中提示“未在列表中发现”。
+
+### 权限
+
+- 默认需要 `mcaiassistant.admin` 才能使用 `/model`；
+- 可在 `plugin.yml` 中调整命令权限或用权限插件授予权限。
+
+### 覆盖策略与回退
+
+- 仅对“聊天用模型”生效，搜索模型仍按配置项工作；
+- 当前“有效模型”优先级：运行时覆盖 &gt; 配置默认；
+- 使用 `/model` 空参可查看当前有效模型与来源。
+
+### 实现参考
+
+- 指令与补全：[src/main/java/com/mcaiassistant/mcaiassistant/ModelCommand.java](src/main/java/com/mcaiassistant/mcaiassistant/ModelCommand.java)
+- 模型覆盖与 `/models` 缓存：[src/main/java/com/mcaiassistant/mcaiassistant/ModelManager.java](src/main/java/com/mcaiassistant/mcaiassistant/ModelManager.java)
+- 请求体使用覆盖模型（聊天场景）：[src/main/java/com/mcaiassistant/mcaiassistant/AiApiClient.java](src/main/java/com/mcaiassistant/mcaiassistant/AiApiClient.java)
+- 插件启动注册与配置重载：[src/main/java/com/mcaiassistant/mcaiassistant/McAiAssistant.java](src/main/java/com/mcaiassistant/mcaiassistant/McAiAssistant.java)
+- 命令声明与权限：[src/main/resources/plugin.yml](src/main/resources/plugin.yml)
