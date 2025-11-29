@@ -317,22 +317,23 @@ public class AiApiClient {
 
         // 场景一：已经获取了知识库信息，任务是直接回答。
         if (knowledgeInfo != null && !knowledgeInfo.trim().isEmpty()) {
-            basePrompt += "\n\n<useful_info>\n" + knowledgeInfo + "\n</useful_info>\n\n" +
-                    "重要：请你只根据以上提供的 <useful_info> 信息来回答用户的问题，不要再使用任何工具（如 query_knowledge 或 create_image）。";
+
+            basePrompt += "\n\n" + knowledgeInfo + "\n\n请仅依据这些片段回答玩家问题，如仍无法解答请直接说明“暂未收录相关资料”。";
+
             return basePrompt;
+
         }
+
+
 
         // 场景二：没有知识库信息，AI 需要判断是否使用工具。
         // 在此场景下，才添加所有可用的工具指令。
 
         // 添加知识库查询工具指令
         if (configManager.isKnowledgeEnabled()) {
-            String knowledgeInstructions = "\n\n # Document Search Tool \n 这个工具非常有用，可以搜索文档，当用户询问需要解答问题、询问到专业知识的时候，你必须在回复中立刻使用、禁止未查询就试图解答问题，系统会自动查询并根据文档向用户提供专业又详细的答案。\n" +
-                    "请分析用户真正的需求，哪怕和文档有一丝关联性也要查询。文档包括以下内容：" + configManager.getKnowledgeContent() + "\n\n" +
-                    "要使用 query_knowledge 工具，你需要在回复中添加一行：\n <query_knowledge query=\"用户问题关键词\" />\n\n" +
-                    "使用工具并回复用户：\"为了向你准确的答复，我需要查询XXX的文档，请稍等一会\" 结束！" +
-                    "示例：<query_knowledge query=\"中世纪教堂的结构以及mc中的做法\" />" +
-                    "可以搜索多个内容：<query_knowledge query=\"Axiom 有关曲线的工具和 Arceon 中制作拱门的指令\" />";
+            String knowledgeInstructions = "\n\n# Local Knowledge Base \n 服务器会在 config/knowledge base 目录维护 Markdown 文档，凡是涉及 " + configManager.getKnowledgeContent() + " 的问题，都应该先发起一次 query_knowledge。\n" +
+                    "当需要查询时，请单独一行输出 <query_knowledge query=\"关键词\" />，插件会并行执行 AI 搜索与关键字检索，并把整理后的 <knowledge_search> 返回给你。\n" +
+                    "如果返回值为 null 表示知识库暂无对应内容，必须如实告知玩家，禁止编造答案。";
             basePrompt += knowledgeInstructions;
         }
 

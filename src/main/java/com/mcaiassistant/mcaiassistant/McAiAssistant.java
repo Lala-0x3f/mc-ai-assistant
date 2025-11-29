@@ -17,7 +17,7 @@ public class McAiAssistant extends JavaPlugin {
     private ChatHistoryManager chatHistoryManager;
     private AiApiClient aiApiClient;
     private SearchApiClient searchApiClient;
-    private KnowledgeApiClient knowledgeApiClient;
+    private KnowledgeBaseManager knowledgeBaseManager;
     private ImageApiClient imageApiClient;
     private RedisChatCompatibility redisChatCompatibility;
     private ToastNotification toastNotification;
@@ -45,8 +45,9 @@ public class McAiAssistant extends JavaPlugin {
         // 初始化搜索 API 客户端
         searchApiClient = new SearchApiClient(configManager);
 
-        // 初始化知识库 API 客户端
-        knowledgeApiClient = new KnowledgeApiClient(configManager);
+        // 初始化本地知识库管理器
+        knowledgeBaseManager = new KnowledgeBaseManager(this, configManager);
+        knowledgeBaseManager.initialize();
 
         // 初始化图像生成 API 客户端
         imageApiClient = new ImageApiClient(this, configManager);
@@ -58,7 +59,7 @@ public class McAiAssistant extends JavaPlugin {
         rateLimitManager = new RateLimitManager(this, configManager);
 
         // 注册聊天监听器
-        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeApiClient, imageApiClient, toastNotification, rateLimitManager);
+        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager);
         getServer().getPluginManager().registerEvents(chatListener, this);
 
         // 注册 /model 指令与补全
@@ -89,8 +90,8 @@ public class McAiAssistant extends JavaPlugin {
             aiApiClient.shutdown();
         }
 
-        if (knowledgeApiClient != null) {
-            knowledgeApiClient.shutdown();
+        if (knowledgeBaseManager != null) {
+            knowledgeBaseManager.shutdown();
         }
 
         if (imageApiClient != null) {
@@ -130,10 +131,10 @@ public class McAiAssistant extends JavaPlugin {
     }
 
     /**
-     * 获取知识库 API 客户端
+     * 获取知识库管理器
      */
-    public KnowledgeApiClient getKnowledgeApiClient() {
-        return knowledgeApiClient;
+    public KnowledgeBaseManager getKnowledgeBaseManager() {
+        return knowledgeBaseManager;
     }
     
     /**
@@ -160,7 +161,7 @@ public class McAiAssistant extends JavaPlugin {
             modelManager.updateConfig(configManager);
         }
         aiApiClient.updateConfig(configManager);
-        knowledgeApiClient.updateConfig(configManager);
+        knowledgeBaseManager.updateConfig(configManager);
         rateLimitManager.updateConfig(configManager);
         redisChatCompatibility.updateConfig(configManager);
         // imageApiClient 也需要更新配置

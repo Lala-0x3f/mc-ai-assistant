@@ -142,26 +142,67 @@ public class ConfigManager {
         return config.getString("permissions.required_permission", "mcaiassistant.use");
     }
 
-    // 知识库配置
-    public String getKnowledgeApiUrl() {
-        return config.getString("knowledge.api_url", "https://api.dify.ai");
-    }
-
-    public String getKnowledgeApiKey() {
-        return config.getString("knowledge.api_key", "");
-    }
-
+    // ֪ʶ������
     public boolean isKnowledgeEnabled() {
         return config.getBoolean("knowledge.enabled", false);
     }
 
-    public String getKnowledgeDatasetId() {
-        return config.getString("knowledge.dataset_id", "");
+    public String getKnowledgeContent() {
+        return config.getString("knowledge.content", "Minecraft �������");
     }
 
-    public String getKnowledgeContent() {
-        return config.getString("knowledge.content", "Minecraft 相关内容");
+    public String getKnowledgeFolderName() {
+        return config.getString("knowledge.folder_name", "knowledge base");
     }
+
+    public String getKnowledgeMappingFileName() {
+        return config.getString("knowledge.mapping_file", "knowledge-cache.yml");
+    }
+
+    public String getKnowledgeCacheDirName() {
+        return config.getString("knowledge.cache_dir", "knowledge-cache");
+    }
+
+    public int getKnowledgeRefreshIntervalTicks() {
+        return config.getInt("knowledge.refresh_interval_ticks", 6000);
+    }
+
+    public int getKnowledgeCombinedCharLimit() {
+        return config.getInt("knowledge.max_combined_chars", 60000);
+    }
+
+    public boolean isKnowledgeAiSearchEnabled() {
+        return config.getBoolean("knowledge.ai_search.enabled", true);
+    }
+
+    public String getKnowledgeAiApiUrl() {
+        return config.getString("knowledge.ai_search.api_url", "https://generativelanguage.googleapis.com");
+    }
+
+    public String getKnowledgeAiModel() {
+        return config.getString("knowledge.ai_search.model", "models/gemini-2.5-flash-lite");
+    }
+
+    public String getKnowledgeAiApiKey() {
+        return config.getString("knowledge.ai_search.api_key", "");
+    }
+
+    public int getKnowledgeAiTimeoutSeconds() {
+        return config.getInt("knowledge.ai_search.timeout_seconds", 10);
+    }
+
+    public boolean isKnowledgeDirectSearchEnabled() {
+        return config.getBoolean("knowledge.direct_search.enabled", true);
+    }
+
+    public int getKnowledgeDirectMaxSnippets() {
+        return config.getInt("knowledge.direct_search.max_snippets", 4);
+    }
+
+    public int getKnowledgeDirectContextRadius() {
+        return config.getInt("knowledge.direct_search.context_radius", 320);
+    }
+
 
     // 图像生成配置
     public boolean isImageGenerationEnabled() {

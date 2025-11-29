@@ -66,11 +66,27 @@ knowledge:
   # 是否启用知识库功能
   enabled: false
 
-  # 知识库 API URL (Dify API)
-  api_url: "https://api.dify.ai"
+  # 知识库内容主题描述 (提示模型何时需要查询本地文档)
+  content: "Minecraft 基础教程、玩法指引、红石线路、建筑技巧"
 
-  # 知识库 API Key (格式: app-...)
-  api_key: "your-knowledge-api-key-here"
+  # 本地知识库存储目录 (位于插件 data 文件夹下)
+  folder_name: "knowledge base"
+  mapping_file: "knowledge-cache.yml"
+  cache_dir: "knowledge-cache"
+  refresh_interval_ticks: 6000
+  max_combined_chars: 60000
+
+  ai_search:
+    enabled: true
+    api_url: "https://generativelanguage.googleapis.com"
+    model: "models/gemini-2.5-flash-lite"
+    api_key: "your-gemini-api-key"
+    timeout_seconds: 10
+
+  direct_search:
+    enabled: true
+    max_snippets: 4
+    context_radius: 320
 
 # 网络性能优化配置
 network:

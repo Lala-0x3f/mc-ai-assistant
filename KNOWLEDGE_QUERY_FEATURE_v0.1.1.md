@@ -4,6 +4,15 @@
 
 MC AI Assistant v0.1.1 重构了知识库查询功能，从每次请求都自动查询知识库改为按需查询的方式，提高了响应速度和效率。
 
+## 📂 本地知识库工作流
+
+- **目录约定**：插件会在 `plugins/McAiAssistant/knowledge base` 目录下收集 Markdown（.md）文档，首次启动自动创建目录。
+- **缓存策略**：每个文档都会计算 MD5 并写入 `knowledge-cache.yml`，同时保存在 `knowledge-cache/` 便于热更新与审计。
+- **热更新**：默认每 6000 Tick（≈5 分钟）扫描一次目录，发现新增/修改/删除即刷新知识库缓存。
+- **双通道检索**：AI 搜索将知识库打包成 `<knowledge_base>` 发送至 `models/gemini-2.5-flash-lite`，并行的直接搜索会返回命中段落，二者统一封装成 `<knowledge_search>`。
+- **结果约束**：若 AI 搜索返回 `null`，表示知识库暂无资料，回答时必须如实告知玩家，不得编造内容。
+
+
 ## ✨ 主要变更
 
 ### 🔄 查询方式变更

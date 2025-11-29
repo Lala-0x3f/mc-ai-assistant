@@ -6,6 +6,8 @@
 
 - 🤖 **智能聊天**: 在游戏中通过 @ai 调用 AI 助手
 - 🧠 **上下文支持**: 自动发送最近 10 条聊天记录作为上下文
+- 📚 **本地知识库**: 支持本地 Markdown 文档知识库，AI 智能搜索 + 直接检索双引擎
+- 🔄 **热更新**: 知识库文件修改后自动生效，无需重启服务器
 - 🎯 **智能识别**: 精确匹配 @ai 标记，不会误触发 @airport 等词汇
 - 🔌 **插件兼容**: 完美兼容 [RedisChat 聊天插件](https://github.com/Emibergo02/RedisChat)
 - ⚙️ **高度可配置**: 支持自定义 API、模型、提示词等
@@ -259,6 +261,182 @@ system_prompt: |
   2. 专注于 Minecraft 相关的内容，包括游戏机制、建筑技巧、红石电路等
   3. 如果玩家问非 Minecraft 相关问题，也可以适当回答，但要保持简洁
   4. 回答要简洁明了，适合在游戏聊天中显示
+```
+
+### 本地知识库配置（v0.1.3 新功能）
+
+v0.1.3 版本引入了全新的本地知识库系统，支持将服务器规则、教程等内容以 Markdown 文件形式存储在本地，并提供 AI 智能搜索和直接检索功能。
+
+#### 基础配置
+
+```yaml
+knowledge:
+  # 是否启用知识库功能
+  enabled: true
+  
+  # 知识库目录名称（相对于插件数据目录）
+  folder_name: "knowledge-base"
+  
+  # 缓存目录名称
+  cache_dir_name: "knowledge-cache"
+  
+  # 映射文件名称
+  mapping_file_name: "knowledge-cache.yml"
+  
+  # 知识库内容描述（帮助 AI 判断何时需要查询知识库）
+  content: "Minecraft 服务器规则、插件使用说明、建筑教程、红石电路教程等"
+  
+  # 热更新间隔（单位：ticks，1200 ticks = 60 秒）
+  refresh_interval_ticks: 1200
+  
+  # 合并文本最大字符数限制
+  combined_char_limit: 100000
+```
+
+#### AI 智能搜索配置
+
+AI 搜索使用 Gemini API 进行语义理解和智能问答：
+
+```yaml
+knowledge:
+  ai_search:
+    # 是否启用 AI 搜索
+    enabled: true
+    
+    # Gemini API URL
+    api_url: "https://generativelanguage.googleapis.com"
+    
+    # Gemini API Key（从 Google AI Studio 获取）
+    api_key: "your-gemini-api-key-here"
+    
+    # 使用的模型
+    model: "gemini-2.0-flash-exp"
+    
+    # 请求超时时间（秒）
+    timeout_seconds: 10
+```
+
+**获取 Gemini API Key:**
+1. 访问 [Google AI Studio](https://aistudio.google.com/)
+2. 登录 Google 账号
+3. 点击 "Get API Key" 创建新的 API 密钥
+4. 将密钥填入配置文件
+
+#### 直接检索配置
+
+直接检索通过关键词匹配快速定位相关文档片段：
+
+```yaml
+knowledge:
+  direct_search:
+    # 是否启用直接检索
+    enabled: true
+    
+    # 最多返回的片段数量
+    max_snippets: 3
+    
+    # 每个片段的上下文半径（字符数）
+    context_radius: 150
+```
+
+#### 知识库目录结构
+
+插件会自动创建以下目录结构：
+
+```
+plugins/McAiAssistant/
+├── knowledge-base/          # 知识库 Markdown 文件目录
+│   ├── rules/              # 服务器规则
+│   │   ├── server-rules.md
+│   │   └── chat-rules.md
+│   ├── tutorials/          # 教程文档
+│   │   ├── building/
+│   │   │   ├── chinese-architecture.md
+│   │   │   └── redstone-basics.md
+│   │   └── plugins/
+│   │       ├── worldedit.md
+│   │       └── plots.md
+│   └── guides/             # 指南文档
+│       └── getting-started.md
+├── knowledge-cache/         # 自动生成的缓存目录
+│   ├── *.txt               # 单个文档缓存
+│   └── knowledge-base.txt  # 合并后的知识库
+└── knowledge-cache.yml      # 缓存元数据映射
+```
+
+#### 添加知识库文档
+
+1. 在 `plugins/McAiAssistant/knowledge-base/` 目录下创建 `.md` 文件
+2. 支持使用子目录分类组织文档
+3. 保存后会自动检测并更新缓存（无需重启服务器）
+
+**文档格式示例：**
+
+```markdown
+# 服务器规则
+
+## 基本规则
+1. 禁止使用作弊器
+2. 尊重其他玩家
+3. 不要破坏他人建筑
+
+## 聊天规则
+- 禁止发送垃圾信息
+- 禁止辱骂他人
+- 保持友好交流
+```
+
+#### 知识库查询工作流程
+
+1. 玩家发送包含 `@ai` 的消息
+2. AI 判断是否需要查询知识库
+3. 如需查询，AI 会生成 `<query_knowledge query="查询内容" />` 标签
+4. 插件并行执行：
+   - **AI 搜索**: 基于完整知识库生成智能回答
+   - **直接检索**: 快速匹配关键词并提取相关片段
+5. 合并结果并返回给玩家
+
+#### 配置建议
+
+**推荐配置（同时启用两种搜索）：**
+```yaml
+knowledge:
+  enabled: true
+  content: "服务器规则、插件教程、建筑指南"
+  
+  ai_search:
+    enabled: true
+    api_key: "your-gemini-api-key"
+  
+  direct_search:
+    enabled: true
+    max_snippets: 3
+```
+
+**仅使用直接检索（无需 API）：**
+```yaml
+knowledge:
+  enabled: true
+  
+  ai_search:
+    enabled: false
+  
+  direct_search:
+    enabled: true
+```
+
+**性能优化配置：**
+```yaml
+knowledge:
+  # 降低刷新频率（120 秒）
+  refresh_interval_ticks: 2400
+  
+  # 限制知识库大小
+  combined_char_limit: 50000
+  
+  ai_search:
+    # 缩短超时时间
+    timeout_seconds: 5
 ```
 
 ## 权限配置

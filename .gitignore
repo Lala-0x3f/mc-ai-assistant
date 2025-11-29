@@ -115,3 +115,6 @@ yarn.lock
 # 其他常见的忽略文件
 *.orig
 *.rej
+
+# 本地临时测试目录，不纳入版本控制
+local-tests/

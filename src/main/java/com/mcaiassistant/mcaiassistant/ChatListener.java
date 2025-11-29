@@ -33,7 +33,7 @@ public class ChatListener implements Listener {
     private final ChatHistoryManager chatHistoryManager;
     private final AiApiClient aiApiClient;
     private final SearchApiClient searchApiClient;
-    private final KnowledgeApiClient knowledgeApiClient;
+    private final KnowledgeBaseManager knowledgeBaseManager;
     private final ImageApiClient imageApiClient;
     private final ToastNotification toastNotification;
     private final RateLimitManager rateLimitManager;
@@ -47,7 +47,7 @@ public class ChatListener implements Listener {
     
     public ChatListener(McAiAssistant plugin, ConfigManager configManager,
                        ChatHistoryManager chatHistoryManager, AiApiClient aiApiClient,
-                       SearchApiClient searchApiClient, KnowledgeApiClient knowledgeApiClient,
+                       SearchApiClient searchApiClient, KnowledgeBaseManager knowledgeBaseManager,
                        ImageApiClient imageApiClient, ToastNotification toastNotification,
                        RateLimitManager rateLimitManager) {
         this.plugin = plugin;
@@ -55,7 +55,7 @@ public class ChatListener implements Listener {
         this.chatHistoryManager = chatHistoryManager;
         this.aiApiClient = aiApiClient;
         this.searchApiClient = searchApiClient;
-        this.knowledgeApiClient = knowledgeApiClient;
+        this.knowledgeBaseManager = knowledgeBaseManager;
         this.imageApiClient = imageApiClient;
         this.toastNotification = toastNotification;
         this.rateLimitManager = rateLimitManager;
@@ -318,7 +318,7 @@ public class ChatListener implements Listener {
 
         // 4. 处理知识库查询（如果存在）
         if (requestPlayer != null && configManager.isKnowledgeEnabled() && response.contains("<query_knowledge")) {
-            Pattern knowledgePattern = Pattern.compile("<query_knowledge\\s+query=\"([^\"]+)\"\\s*/>");
+        Pattern knowledgePattern = Pattern.compile("<query_knowledge\\s+query=\"([^\"]+)\"\\s*/>");
             Matcher matcher = knowledgePattern.matcher(response);
             if (matcher.find()) {
                 if (configManager.isDebugMode()) {
@@ -714,113 +714,72 @@ public class ChatListener implements Listener {
             }
         }
 
-        // 检查响应中是否包含知识库查询标签
         Pattern knowledgePattern = Pattern.compile("<query_knowledge\\s+query=\"([^\"]+)\"\\s*/>");
         Matcher matcher = knowledgePattern.matcher(response);
 
-        if (matcher.find()) {
-            final String query = matcher.group(1);
+        if (!matcher.find()) {
+            return;
+        }
+
+        final String query = matcher.group(1).trim();
+
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[知识库查询] ✅ 检测到知识库查询请求");
+            plugin.getLogger().info("[知识库查询] 查询内容: " + query);
+            plugin.getLogger().info("[知识库查询] 请求玩家: " + player.getName());
+            plugin.getLogger().info("[知识库查询] 知识库配置内容: " + configManager.getKnowledgeContent());
+        }
+
+        CompletableFuture.supplyAsync(() -> {
+            long startTime = System.currentTimeMillis();
+            KnowledgeSearchResult result = knowledgeBaseManager.searchKnowledge(query);
+            long duration = System.currentTimeMillis() - startTime;
 
             if (configManager.isDebugMode()) {
-                plugin.getLogger().info("[知识库查询] ✅ 检测到知识库查询请求");
-                plugin.getLogger().info("[知识库查询] 查询内容: " + query);
-                plugin.getLogger().info("[知识库查询] 请求玩家: " + player.getName());
-                plugin.getLogger().info("[知识库查询] 知识库配置内容: " + configManager.getKnowledgeContent());
-                plugin.getLogger().info("[知识库查询] 开始异步查询知识库...");
-            }
-
-            // 异步查询知识库并重新请求 AI
-            CompletableFuture.supplyAsync(() -> {
-                long startTime = System.currentTimeMillis();
-
-                if (configManager.isDebugMode()) {
-                    plugin.getLogger().info("[知识库查询] 🔍 开始调用知识库 API");
-                    plugin.getLogger().info("[知识库查询] API URL: " + configManager.getKnowledgeApiUrl());
+                plugin.getLogger().info("[知识库查询] 本地检索耗时: " + duration + "ms");
+                if (result != null && !result.isEmpty()) {
+                    plugin.getLogger().info("[知识库查询] AI 摘要长度: " + (result.getAiAnswer() == null ? 0 : result.getAiAnswer().length()));
+                    plugin.getLogger().info("[知识库查询] 直接命中数量: " + result.getSnippets().size());
+                } else {
+                    plugin.getLogger().info("[知识库查询] 未命中任何知识片段");
                 }
-
+            }
+            return result;
+        }).thenAccept(result -> {
+            if (result == null || result.isEmpty()) {
+                if (configManager.isDebugMode()) {
+                    plugin.getLogger().info("[知识库查询] 未找到任何可用片段，直接反馈暂无资料");
+                }
+                Bukkit.getScheduler().runTask(plugin, () -> sendFinalAiResponse("抱歉，本地知识库暂未收录相关资料，我会持续关注更新。"));
+                return;
+            }
+            CompletableFuture.supplyAsync(() -> {
                 try {
-                    // 查询知识库
-                    String knowledgeInfo = knowledgeApiClient.queryKnowledge(query);
-
-                    long duration = System.currentTimeMillis() - startTime;
-
+                    List<String> context = configManager.isContextEnabled()
+                            ? chatHistoryManager.getRecentMessages(configManager.getContextMessages())
+                            : null;
+                    String knowledgePayload = result == null ? null : result.toPromptPayload();
                     if (configManager.isDebugMode()) {
-                        if (knowledgeInfo != null) {
-                            plugin.getLogger().info("[知识库查询] ✅ 查询成功，用时: " + duration + "ms");
-                            plugin.getLogger().info("[知识库查询] 获得相关信息长度: " + knowledgeInfo.length() + " 字符");
-                            if (knowledgeInfo.length() < 200) {
-                                plugin.getLogger().info("[知识库查询] 完整知识库内容: " + knowledgeInfo);
-                            } else {
-                                plugin.getLogger().info("[知识库查询] 知识库内容预览: " + knowledgeInfo.substring(0, 200) + "...");
-                            }
-                        } else {
-                            plugin.getLogger().info("[知识库查询] ❌ 查询无结果，用时: " + duration + "ms");
-                        }
+                        plugin.getLogger().info("[知识库查询] 传入知识片段是否为空: " + (knowledgePayload == null ? "是" : "否"));
                     }
-
-                    return knowledgeInfo;
+                    return aiApiClient.sendMessageWithKnowledge(cleanMessage, context, knowledgePayload);
                 } catch (Exception e) {
-                    long duration = System.currentTimeMillis() - startTime;
                     if (configManager.isDebugMode()) {
-                        plugin.getLogger().warning("[知识库查询] ❌ 查询失败，用时: " + duration + "ms");
-                        plugin.getLogger().warning("[知识库查询] 错误详情: " + e.getMessage());
-                        plugin.getLogger().warning("[知识库查询] 异常类型: " + e.getClass().getSimpleName());
-                        if (e.getCause() != null) {
-                            plugin.getLogger().warning("[知识库查询] 根本原因: " + e.getCause().getMessage());
-                        }
+                        plugin.getLogger().warning("[知识库查询] 生成知识库回复失败: " + e.getMessage());
                     }
                     return null;
                 }
-            }).thenAccept(knowledgeInfo -> {
-                // 在异步线程中调用 AI API，避免阻塞主线程
-                CompletableFuture.supplyAsync(() -> {
-                    long aiStartTime = System.currentTimeMillis();
-                    try {
-                        if (configManager.isDebugMode()) {
-                            plugin.getLogger().info("[知识库查询] 🔄 开始处理知识库查询结果");
-                            plugin.getLogger().info("[知识库查询] 知识库信息是否为空: " + (knowledgeInfo == null ? "是" : "否"));
-                            plugin.getLogger().info("[知识库查询] 使用传入的原始消息: " + cleanMessage);
-                        }
-                        List<String> context = configManager.isContextEnabled() ?
-                            chatHistoryManager.getRecentMessages(configManager.getContextMessages()) : null;
-                        if (configManager.isDebugMode()) {
-                            plugin.getLogger().info("[知识库查询] 上下文消息数量: " + (context != null ? context.size() : 0));
-                            plugin.getLogger().info("[知识库查询] 🤖 开始调用 AI API 生成最终回答...");
-                        }
-                        String finalResponse = aiApiClient.sendMessageWithKnowledge(cleanMessage, context, knowledgeInfo);
-                        long aiDuration = System.currentTimeMillis() - aiStartTime;
-                        if (configManager.isDebugMode()) {
-                            plugin.getLogger().info("[知识库查询] AI API 调用完成，用时: " + aiDuration + "ms");
-                            if (finalResponse != null) {
-                                plugin.getLogger().info("[知识库查询] 最终响应长度: " + finalResponse.length() + " 字符");
-                            } else {
-                                plugin.getLogger().warning("[知识库查询] ❌ AI 返回了空响应");
-                            }
-                        }
-                        return finalResponse;
-                    } catch (Exception e) {
-                        if (configManager.isDebugMode()) {
-                            plugin.getLogger().warning("[知识库查询] 处理最终响应失败: " + e.getMessage());
-                        }
-                        return null;
+            }).thenAccept(finalResponse -> Bukkit.getScheduler().runTask(plugin, () -> {
+                if (finalResponse != null && !finalResponse.trim().isEmpty()) {
+                    sendFinalAiResponse(finalResponse);
+                    if (configManager.isDebugMode()) {
+                        plugin.getLogger().info("[知识库查询] ✅ 知识库查询流程完毕");
                     }
-                }).thenAccept(finalResponse -> {
-                    // 回到主线程发送响应
-                    Bukkit.getScheduler().runTask(plugin, () -> {
-                        if (finalResponse != null && !finalResponse.trim().isEmpty()) {
-                            sendFinalAiResponse(finalResponse);
-                            if (configManager.isDebugMode()) {
-                                plugin.getLogger().info("[知识库查询] ✅ 知识库查询流程完成");
-                            }
-                        } else {
-                            if (configManager.isDebugMode()) {
-                                plugin.getLogger().warning("[知识库查询] ❌ 最终响应为空，跳过发送");
-                            }
-                        }
-                    });
-                });
-            });
-        }
+                } else if (configManager.isDebugMode()) {
+                    plugin.getLogger().warning("[知识库查询] ⚠ 最终响应为空，跳过发送");
+                }
+            }));
+        });
     }
 
     /**
