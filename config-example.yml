@@ -50,6 +50,26 @@ chat:
   # 是否启用智能匹配 (避免匹配到 @airport 等词)
   smart_matching: true
 
+# 经济扣费配置（可选，需安装 Vault/CMI 等经济插件）
+economy:
+  # 是否启用 AI 调用扣费
+  enabled: false
+
+  # 每次调用 AI 扣除的金额
+  cost_per_use: 10.0
+
+  # 余额不足时的提示（占位符 {cost} 会被替换为金额）
+  insufficient_funds_message: "&c余额不足，使用 AI 需要支付 {cost}"
+
+  # 扣费出现错误时的提示（占位符 {reason} 会被替换为失败原因）
+  charge_failed_message: "&c扣费失败，原因: {reason}，本次未响应。"
+
+  # 扣费成功后给请求玩家的余额提示（仅自己可见，支持颜色代码和占位符 {balance}/{old}/{new}）
+  balance_message: "&b[AI]&f 剩余：{balance} 余额"
+
+  # 余额提示的悬停文本（支持 {old}/{new}）
+  balance_hover_message: "&7余额：{old}->{new}"
+
 # 网络搜索配置
 search:
   # 搜索模型

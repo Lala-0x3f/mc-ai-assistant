@@ -22,6 +22,7 @@ public class McAiAssistant extends JavaPlugin {
     private RedisChatCompatibility redisChatCompatibility;
     private ToastNotification toastNotification;
     private RateLimitManager rateLimitManager;
+    private EconomyManager economyManager;
     
     @Override
     public void onEnable() {
@@ -58,8 +59,12 @@ public class McAiAssistant extends JavaPlugin {
         // 初始化速率限制管理器
         rateLimitManager = new RateLimitManager(this, configManager);
 
+        // 初始化经济扣费管理器
+        economyManager = new EconomyManager(this, configManager);
+        economyManager.initialize();
+
         // 注册聊天监听器
-        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager);
+        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager, economyManager);
         getServer().getPluginManager().registerEvents(chatListener, this);
 
         // 注册 /model 指令与补全
@@ -69,6 +74,15 @@ public class McAiAssistant extends JavaPlugin {
             getCommand("model").setTabCompleter(modelCommand);
         } else {
             getLogger().warning("未在 plugin.yml 中找到 model 指令定义，/model 无法注册");
+        }
+
+        // 注册 /aitest 指令与补全（模型/知识库健康检查）
+        if (getCommand("aitest") != null) {
+            TestCommand testCommand = new TestCommand(this, configManager, aiApiClient, knowledgeBaseManager);
+            getCommand("aitest").setExecutor(testCommand);
+            getCommand("aitest").setTabCompleter(testCommand);
+        } else {
+            getLogger().warning("未在 plugin.yml 中找到 aitest 指令定义，/aitest 无法注册");
         }
  
         // 初始化 RedisChat 兼容性
@@ -150,6 +164,13 @@ public class McAiAssistant extends JavaPlugin {
     public ToastNotification getToastNotification() {
         return toastNotification;
     }
+
+    /**
+     * 获取经济扣费管理器
+     */
+    public EconomyManager getEconomyManager() {
+        return economyManager;
+    }
     
     /**
      * 重载配置
@@ -164,6 +185,9 @@ public class McAiAssistant extends JavaPlugin {
         knowledgeBaseManager.updateConfig(configManager);
         rateLimitManager.updateConfig(configManager);
         redisChatCompatibility.updateConfig(configManager);
+        if (economyManager != null) {
+            economyManager.reload();
+        }
         // imageApiClient 也需要更新配置
         if (imageApiClient != null) {
             imageApiClient.updateConfig(configManager);

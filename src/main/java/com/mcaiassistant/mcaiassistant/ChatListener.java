@@ -6,6 +6,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import com.mcaiassistant.mcaiassistant.EconomyManager;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
@@ -13,6 +14,7 @@ import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 
 import java.util.List;
 import java.util.Map;
@@ -37,6 +39,7 @@ public class ChatListener implements Listener {
     private final ImageApiClient imageApiClient;
     private final ToastNotification toastNotification;
     private final RateLimitManager rateLimitManager;
+    private final EconomyManager economyManager;
     
     // 智能匹配模式，避免匹配到 @airport 等词
     private static final Pattern SMART_AI_PATTERN = Pattern.compile("(?:^|\\s)@ai(?:\\s|$|[^a-zA-Z])", Pattern.CASE_INSENSITIVE);
@@ -49,7 +52,7 @@ public class ChatListener implements Listener {
                        ChatHistoryManager chatHistoryManager, AiApiClient aiApiClient,
                        SearchApiClient searchApiClient, KnowledgeBaseManager knowledgeBaseManager,
                        ImageApiClient imageApiClient, ToastNotification toastNotification,
-                       RateLimitManager rateLimitManager) {
+                       RateLimitManager rateLimitManager, EconomyManager economyManager) {
         this.plugin = plugin;
         this.configManager = configManager;
         this.chatHistoryManager = chatHistoryManager;
@@ -59,6 +62,7 @@ public class ChatListener implements Listener {
         this.imageApiClient = imageApiClient;
         this.toastNotification = toastNotification;
         this.rateLimitManager = rateLimitManager;
+        this.economyManager = economyManager;
     }
     
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
@@ -114,8 +118,18 @@ public class ChatListener implements Listener {
                 return;
             }
 
-            // 记录请求
-            rateLimitManager.recordRequest(player);
+            // 经济预检：余额不足则直接提示并终止，不进入搜索请求
+            EconomyManager.EconomyChargeResult preCheck = economyManager.preCheck(player);
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[经济扣费][搜索] 预检结果 -> success: " + preCheck.isSuccess() + ", skipped: " + preCheck.isSkipped()
+                        + ", insufficient: " + preCheck.isInsufficientFunds() + ", oldBalance: " + formatCost(preCheck.getOldBalance()));
+            }
+            if (!preCheck.isSuccess() && !preCheck.isSkipped()) {
+                String template = configManager.getEconomyInsufficientMessage();
+                String msg = formatEconomyMessage(template, configManager.getEconomyCostPerUse(), preCheck.getErrorMessage());
+                player.sendMessage(ChatColor.translateAlternateColorCodes('&', msg));
+                return;
+            }
 
             // 异步处理搜索请求
             handleSearchRequest(player, message);
@@ -147,8 +161,18 @@ public class ChatListener implements Listener {
                 return;
             }
 
-            // 记录请求
-            rateLimitManager.recordRequest(player);
+            // 经济预检：余额不足则直接提示并终止，不进入 AI 请求
+            EconomyManager.EconomyChargeResult preCheck = economyManager.preCheck(player);
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[经济扣费] 预检结果 -> success: " + preCheck.isSuccess() + ", skipped: " + preCheck.isSkipped()
+                        + ", insufficient: " + preCheck.isInsufficientFunds() + ", oldBalance: " + formatCost(preCheck.getOldBalance()));
+            }
+            if (!preCheck.isSuccess() && !preCheck.isSkipped()) {
+                String template = configManager.getEconomyInsufficientMessage();
+                String msg = formatEconomyMessage(template, configManager.getEconomyCostPerUse(), preCheck.getErrorMessage());
+                player.sendMessage(ChatColor.translateAlternateColorCodes('&', msg));
+                return;
+            }
 
             // 异步处理 AI 请求
             handleAiRequest(player, message);
@@ -210,8 +234,29 @@ public class ChatListener implements Listener {
         // 显示通知
         showProcessingNotifications(player);
         
+        EconomyManager.EconomyChargeResult chargeResult = null;
+        if (economyManager.isActive()) {
+            chargeResult = chargePlayerForAi(player);
+            if (chargeResult != null && !chargeResult.isSkipped() && !chargeResult.isSuccess()) {
+                // 扣费失败时已提示，计入频率后终止
+                rateLimitManager.recordRequest(player);
+                return;
+            }
+            if (chargeResult != null && chargeResult.isSuccess()) {
+                rateLimitManager.recordRequest(player);
+            } else if (chargeResult != null && chargeResult.isSkipped()) {
+                rateLimitManager.recordRequest(player);
+            }
+        } else {
+            rateLimitManager.recordRequest(player);
+        }
+
+        // 在进入异步调用前将扣费结果固化，便于在 Lambda 中安全使用
+        final EconomyManager.EconomyChargeResult finalChargeResult = chargeResult;
+
         // 异步调用 AI API
         CompletableFuture.supplyAsync(() -> {
+            ResponseWrapper wrapper = new ResponseWrapper();
             try {
                 if (configManager.isDebugMode()) {
                     plugin.getLogger().info("开始处理 AI 请求，清理后的消息: " + cleanMessage);
@@ -226,22 +271,39 @@ public class ChatListener implements Listener {
                 }
 
                 // 调用 AI API（不再自动查询知识库）
-                return aiApiClient.sendMessage(cleanMessage, context);
+                wrapper.response = aiApiClient.sendMessage(cleanMessage, context);
+                wrapper.failed = false;
+                return wrapper;
             } catch (Exception e) {
                 plugin.getLogger().severe("AI API 调用失败: " + e.getMessage());
                 if (configManager.isDebugMode()) {
                     plugin.getLogger().severe("AI API 调用异常详情:");
                     e.printStackTrace();
                 }
-                return "抱歉，AI 助手暂时无法响应，请稍后再试。技术详情: " + e.getMessage();
+                wrapper.response = "抱歉，AI 助手暂时无法响应，请稍后再试。技术详情: " + e.getMessage();
+                wrapper.failed = true;
+                return wrapper;
             }
-        }).thenAccept(response -> {
+        }).thenAccept(result -> {
             // 在主线程中发送响应
             Bukkit.getScheduler().runTask(plugin, () -> {
                 if (configManager.isDebugMode()) {
-                    plugin.getLogger().info("AI 请求处理完成，响应长度: " + (response != null ? response.length() : 0));
+                    plugin.getLogger().info("AI 请求处理完成，响应长度: " + (result != null && result.response != null ? result.response.length() : 0));
                 }
-                sendAiResponse(response, player, cleanMessage);
+
+                if (result == null || result.response == null || result.response.trim().isEmpty() || result.failed) {
+                    if (finalChargeResult != null && finalChargeResult.isSuccess()) {
+                        economyManager.refund(player, finalChargeResult.getCost());
+                        if (configManager.isDebugMode()) {
+                            plugin.getLogger().info("[经济扣费] AI 未能响应，已为玩家退款: " + formatCost(finalChargeResult.getCost()));
+                        }
+                    }
+                    // 返回简单提示给玩家
+                    player.sendMessage(ChatColor.RED + "抱歉，AI 助手暂时无法响应，请稍后再试。");
+                    return;
+                }
+
+                sendAiResponse(result.response, player, cleanMessage, finalChargeResult);
             });
         });
     }
@@ -267,13 +329,13 @@ public class ChatListener implements Listener {
      * 发送 AI 响应到聊天
      */
     public void sendAiResponse(String response) {
-        sendAiResponse(response, null, null);
+        sendAiResponse(response, null, null, null);
     }
 
     /**
      * 发送 AI 响应到聊天（带玩家信息用于图像生成）
      */
-    public void sendAiResponse(String response, Player requestPlayer, String originalMessage) {
+    public void sendAiResponse(String response, Player requestPlayer, String originalMessage, EconomyManager.EconomyChargeResult chargeResult) {
         if (configManager.isDebugMode()) {
             plugin.getLogger().info("[响应处理] 📥 收到 AI 响应，开始处理");
             if (response != null) {
@@ -290,6 +352,9 @@ public class ChatListener implements Listener {
         }
 
         if (response == null || response.trim().isEmpty()) {
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().warning("[响应处理] 收到空响应，跳过发送与扣费");
+            }
             return;
         }
 
@@ -338,6 +403,14 @@ public class ChatListener implements Listener {
                 plugin.getLogger().info("[响应处理] 🎨 检测到图像生成标签，开始处理...");
             }
             processImageGeneration(requestPlayer, response);
+        }
+
+        // 6. 在 AI 内容发送完毕后再提示扣费结果
+        if (requestPlayer != null && chargeResult != null && !chargeResult.isSkipped() && chargeResult.isSuccess()) {
+            sendBalanceMessage(requestPlayer, chargeResult);
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[经济扣费] 已在响应后提示余额，玩家: " + requestPlayer.getName());
+            }
         }
     }
 
@@ -402,15 +475,38 @@ public class ChatListener implements Listener {
         // 显示通知
         showProcessingNotifications(player);
 
+        EconomyManager.EconomyChargeResult chargeResult = null;
+        if (economyManager.isActive()) {
+            chargeResult = chargePlayerForAi(player);
+            if (chargeResult != null && !chargeResult.isSkipped() && !chargeResult.isSuccess()) {
+                // 扣费失败时已提示，计入频率后终止
+                rateLimitManager.recordRequest(player);
+                return;
+            }
+            if (chargeResult != null && chargeResult.isSuccess()) {
+                rateLimitManager.recordRequest(player);
+            } else if (chargeResult != null && chargeResult.isSkipped()) {
+                rateLimitManager.recordRequest(player);
+            }
+        } else {
+            rateLimitManager.recordRequest(player);
+        }
+
+        // 将扣费结果固化，保证异步处理时可安全访问
+        final EconomyManager.EconomyChargeResult finalChargeResult = chargeResult;
+
         // 异步调用搜索 API
         CompletableFuture.supplyAsync(() -> {
+            SearchWrapper wrapper = new SearchWrapper();
             try {
                 if (configManager.isDebugMode()) {
                     plugin.getLogger().info("开始处理搜索请求，清理后的消息: " + cleanMessage);
                 }
 
                 // 调用新的搜索 API
-                return searchApiClient.search(cleanMessage);
+                wrapper.result = searchApiClient.search(cleanMessage);
+                wrapper.failed = false;
+                return wrapper;
             } catch (Exception e) {
                 plugin.getLogger().severe("搜索 API 调用失败: " + e.getMessage());
                 if (configManager.isDebugMode()) {
@@ -422,17 +518,35 @@ public class ChatListener implements Listener {
                 SearchApiClient.SearchResult errorResult = new SearchApiClient.SearchResult();
                 errorResult.setSearchQuery("搜索失败");
                 errorResult.setResultText("抱歉，搜索功能暂时无法使用，请稍后再试。技术详情: " + e.getMessage());
-                return errorResult;
+                wrapper.result = errorResult;
+                wrapper.failed = true;
+                return wrapper;
             }
-        }).thenAccept(searchResult -> {
+        }).thenAccept(wrapper -> {
             // 在主线程中发送响应
             Bukkit.getScheduler().runTask(plugin, () -> {
                 if (configManager.isDebugMode()) {
                     plugin.getLogger().info("搜索请求处理完成");
-                    plugin.getLogger().info("搜索查询: " + searchResult.getSearchQuery());
-                    plugin.getLogger().info("搜索结果长度: " + (searchResult.getResultText() != null ? searchResult.getResultText().length() : 0));
+                    if (wrapper != null && wrapper.result != null) {
+                        plugin.getLogger().info("搜索查询: " + wrapper.result.getSearchQuery());
+                        plugin.getLogger().info("搜索结果长度: " + (wrapper.result.getResultText() != null ? wrapper.result.getResultText().length() : 0));
+                    }
                 }
-                sendSearchResponse(searchResult);
+
+                boolean needRefund = wrapper == null || wrapper.result == null || wrapper.failed
+                        || wrapper.result.getResultText() == null || wrapper.result.getResultText().trim().isEmpty();
+                if (needRefund && finalChargeResult != null && finalChargeResult.isSuccess()) {
+                    economyManager.refund(player, finalChargeResult.getCost());
+                    if (configManager.isDebugMode()) {
+                        plugin.getLogger().info("[经济扣费][搜索] 搜索失败或结果为空，已为玩家退款: " + formatCost(finalChargeResult.getCost()));
+                    }
+                }
+
+                if (wrapper == null || wrapper.result == null) {
+                    player.sendMessage(ChatColor.RED + "抱歉，搜索功能暂时无法使用，请稍后再试。");
+                    return;
+                }
+                sendSearchResponse(wrapper.result);
             });
         });
     }
@@ -873,6 +987,103 @@ public class ChatListener implements Listener {
         }
 
         return result;
+    }
+
+    /**
+     * 扣费并提示结果
+     */
+    private EconomyManager.EconomyChargeResult chargePlayerForAi(Player player) {
+        EconomyManager.EconomyChargeResult chargeResult = economyManager.chargePlayer(player);
+
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[经济扣费] 触发扣费流程，玩家: " + player.getName());
+            plugin.getLogger().info("[经济扣费] 结果: " + (chargeResult.isSuccess() ? "成功" : (chargeResult.isSkipped() ? "跳过" : "失败"))
+                    + " | 原余额: " + formatCost(chargeResult.getOldBalance())
+                    + " | 新余额: " + formatCost(chargeResult.getNewBalance()));
+        }
+
+        if (chargeResult.isSkipped()) {
+            return chargeResult;
+        }
+
+        if (chargeResult.isSuccess()) {
+            return chargeResult;
+        }
+
+        String template = chargeResult.isInsufficientFunds()
+            ? configManager.getEconomyInsufficientMessage()
+            : configManager.getEconomyChargeFailedMessage();
+        String message = formatEconomyMessage(template, configManager.getEconomyCostPerUse(), chargeResult.getErrorMessage());
+        player.sendMessage(ChatColor.translateAlternateColorCodes('&', message));
+
+        return chargeResult;
+    }
+
+    /**
+     * 发送扣费后的余额提示（仅请求者可见）
+     */
+    private void sendBalanceMessage(Player player, EconomyManager.EconomyChargeResult chargeResult) {
+        if (chargeResult == null || chargeResult.isSkipped() || !chargeResult.isSuccess()) {
+            return;
+        }
+
+        String messageTemplate = configManager.getEconomyBalanceMessage();
+        String hoverTemplate = configManager.getEconomyBalanceHoverMessage();
+
+        String messageText = replaceBalancePlaceholders(messageTemplate, chargeResult);
+        String hoverText = replaceBalancePlaceholders(hoverTemplate, chargeResult);
+
+        Component base = LegacyComponentSerializer.legacyAmpersand().deserialize(messageText);
+        Component hover = LegacyComponentSerializer.legacyAmpersand().deserialize(hoverText);
+
+        Component withHover = base.hoverEvent(HoverEvent.showText(hover));
+        player.sendMessage(withHover);
+
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[经济扣费] 已向玩家 " + player.getName() + " 发送余额提示: " + messageText + " (hover: " + hoverText + ")");
+        }
+    }
+
+    /**
+     * 构造扣费提示消息
+     */
+    private String formatEconomyMessage(String template, double cost, String reason) {
+        String message = template == null ? "" : template;
+        message = message.replace("{cost}", formatCost(cost));
+        if (reason != null) {
+            message = message.replace("{reason}", reason);
+        }
+        return message;
+    }
+
+    /**
+     * 替换余额提示中的占位符
+     */
+    private String replaceBalancePlaceholders(String template, EconomyManager.EconomyChargeResult result) {
+        String message = template == null ? "" : template;
+        message = message.replace("{balance}", formatCost(result.getNewBalance()));
+        message = message.replace("{new}", formatCost(result.getNewBalance()));
+        message = message.replace("{new_balance}", formatCost(result.getNewBalance()));
+        message = message.replace("{old}", formatCost(result.getOldBalance()));
+        message = message.replace("{old_balance}", formatCost(result.getOldBalance()));
+        message = message.replace("{cost}", formatCost(result.getCost()));
+        return message;
+    }
+
+    /**
+     * 格式化金额显示
+     */
+    private String formatCost(double cost) {
+        return String.format("%.2f", cost);
+    }
+
+    private static class ResponseWrapper {
+        private String response;
+        private boolean failed;
+    }
+    private static class SearchWrapper {
+        private SearchApiClient.SearchResult result;
+        private boolean failed;
     }
 
     /**

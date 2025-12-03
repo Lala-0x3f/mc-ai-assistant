@@ -277,7 +277,7 @@ public class RedisChatCompatibility implements Listener {
         }).thenAccept(response -> {
             // 在主线程中发送响应
             Bukkit.getScheduler().runTask(plugin, () -> {
-                chatListener.sendAiResponse(response, player, cleanMessage);
+                chatListener.sendAiResponse(response, player, cleanMessage, null);
             });
         });
     }

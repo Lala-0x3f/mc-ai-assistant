@@ -132,6 +132,31 @@ public class ConfigManager {
     public boolean isDebugMode() {
         return config.getBoolean("features.debug_mode", false);
     }
+
+    // 经济扣费配置
+    public boolean isEconomyEnabled() {
+        return config.getBoolean("economy.enabled", false);
+    }
+
+    public double getEconomyCostPerUse() {
+        return config.getDouble("economy.cost_per_use", 0.0);
+    }
+
+    public String getEconomyInsufficientMessage() {
+        return config.getString("economy.insufficient_funds_message", "&c余额不足，使用 AI 需要支付 {cost}。");
+    }
+
+    public String getEconomyChargeFailedMessage() {
+        return config.getString("economy.charge_failed_message", "&c扣费失败，原因: {reason}，已取消本次 AI 请求。");
+    }
+
+    public String getEconomyBalanceMessage() {
+        return config.getString("economy.balance_message", "&b[AI]&f 剩余：{balance} 余额");
+    }
+
+    public String getEconomyBalanceHoverMessage() {
+        return config.getString("economy.balance_hover_message", "&7余额：{old}->{new}");
+    }
     
     // 权限配置
     public boolean isAllowAllPlayers() {

@@ -1,5 +1,5 @@
 name: McAiAssistant
-version: '0.1.3'
+version: '0.1.4-rc3'
 main: com.mcaiassistant.mcaiassistant.McAiAssistant
 api-version: '1.21'
 description: AI Assistant plugin for PaperMC 1.21.4
@@ -7,7 +7,7 @@ author: ifctmzzz
 website: https://github.com/Lala-0x3f/mc-ai-assistant
 
 # 软依赖 RedisChat 插件
-softdepend: [RedisChat]
+softdepend: [RedisChat, Vault, CMI]
 
 # 权限节点
 permissions:
@@ -20,10 +20,18 @@ permissions:
     default: op
     children:
       mcaiassistant.use: true
+  mcaiassistant.test:
+    description: 允许执行 AI 助手健康检查指令
+    default: op
 
 commands:
   model:
     description: 查看或切换当前 AI 模型
     usage: "/model [modelId]"
+    permission: mcaiassistant.admin
+    permission-message: "没有权限执行该命令。"
+  aitest:
+    description: 测试 AI 模型与知识库可用性
+    usage: "/aitest <model|kb|all>"
     permission: mcaiassistant.admin
     permission-message: "没有权限执行该命令。"
