@@ -24,6 +24,7 @@ public class McAiAssistant extends JavaPlugin {
     private ToastNotification toastNotification;
     private RateLimitManager rateLimitManager;
     private EconomyManager economyManager;
+    private CommandWhitelistManager commandWhitelistManager;
     
     @Override
     public void onEnable() {
@@ -67,8 +68,12 @@ public class McAiAssistant extends JavaPlugin {
         economyManager = new EconomyManager(this, configManager);
         economyManager.initialize();
 
+        // 初始化 AI 指令白名单管理器
+        commandWhitelistManager = new CommandWhitelistManager(this);
+        commandWhitelistManager.initialize();
+
         // 注册聊天监听器
-        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager, economyManager, globalMemoryManager);
+        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager, economyManager, globalMemoryManager, commandWhitelistManager);
         getServer().getPluginManager().registerEvents(chatListener, this);
 
         // 注册 /model 指令与补全
@@ -88,9 +93,18 @@ public class McAiAssistant extends JavaPlugin {
         } else {
             getLogger().warning("未在 plugin.yml 中找到 aitest 指令定义，/aitest 无法注册");
         }
+
+        // 注册 /aicmdwl 指令（AI 指令白名单管理）
+        if (getCommand("aicmdwl") != null) {
+            AiCommandWhitelistCommand whitelistCommand = new AiCommandWhitelistCommand(this, commandWhitelistManager);
+            getCommand("aicmdwl").setExecutor(whitelistCommand);
+            getCommand("aicmdwl").setTabCompleter(whitelistCommand);
+        } else {
+            getLogger().warning("未在 plugin.yml 中找到 aicmdwl 指令定义，/aicmdwl 无法注册");
+        }
  
         // 初始化 RedisChat 兼容性
-        redisChatCompatibility = new RedisChatCompatibility(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, chatListener, toastNotification, globalMemoryManager);
+        redisChatCompatibility = new RedisChatCompatibility(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, chatListener, toastNotification, globalMemoryManager, rateLimitManager, economyManager);
         
         // 启动定时任务清理过期的速率限制记录
         getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
@@ -174,6 +188,13 @@ public class McAiAssistant extends JavaPlugin {
      */
     public EconomyManager getEconomyManager() {
         return economyManager;
+    }
+
+    /**
+     * 获取 AI 指令白名单管理器
+     */
+    public CommandWhitelistManager getCommandWhitelistManager() {
+        return commandWhitelistManager;
     }
     
     /**

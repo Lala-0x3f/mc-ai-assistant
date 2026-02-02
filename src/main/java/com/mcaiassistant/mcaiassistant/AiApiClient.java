@@ -327,6 +327,51 @@ public class AiApiClient {
     }
 
     /**
+     * 构建 Agent 初始 messages（system + context + user）
+     */
+    public JsonArray buildAgentInitialMessages(String message, List<String> context) {
+        JsonArray messages = new JsonArray();
+
+        JsonObject systemMessage = new JsonObject();
+        systemMessage.addProperty("role", "system");
+        systemMessage.addProperty("content", buildSystemPrompt(false, null));
+        messages.add(systemMessage);
+
+        if (context != null && !context.isEmpty()) {
+            for (String contextMsg : context) {
+                if (contextMsg != null && !contextMsg.trim().isEmpty()) {
+                    JsonObject contextMessage = new JsonObject();
+                    contextMessage.addProperty("role", "user");
+                    contextMessage.addProperty("content", contextMsg);
+                    messages.add(contextMessage);
+                }
+            }
+        }
+
+        JsonObject userMessage = new JsonObject();
+        userMessage.addProperty("role", "user");
+        userMessage.addProperty("content", buildEnhancedMessage(message, false));
+        messages.add(userMessage);
+
+        return messages;
+    }
+
+    /**
+     * 以给定 messages 发送一次 chat/completions（可选启用 tools）
+     */
+    public AiResponse sendChatCompletionWithMessages(JsonArray messages, boolean includeTools) throws IOException {
+        JsonObject requestBody = new JsonObject();
+        requestBody.addProperty("model", modelManager.getEffectiveChatModel());
+        requestBody.addProperty("max_tokens", configManager.getMaxTokens());
+        requestBody.addProperty("temperature", configManager.getTemperature());
+        requestBody.add("messages", messages);
+        if (includeTools) {
+            appendTools(requestBody);
+        }
+        return executeRequest(requestBody, false);
+    }
+
+    /**
      * 构建 API 请求体
      */
     private JsonObject buildRequestBody(String message, List<String> context) {
@@ -452,7 +497,6 @@ public class AiApiClient {
             if (toolCall.getId() != null && !toolCall.getId().isEmpty()) {
                 toolMessage.addProperty("tool_call_id", toolCall.getId());
             }
-            toolMessage.addProperty("name", toolCall.getName());
             toolMessage.addProperty("content", toolResultContent == null ? "" : toolResultContent);
             messages.add(toolMessage);
         }
@@ -597,9 +641,36 @@ public class AiApiClient {
             tools.add(tool);
         }
 
+        if (commandWhitelistManagerEnabled()) {
+            JsonObject tool = new JsonObject();
+            tool.addProperty("type", "function");
+            JsonObject function = new JsonObject();
+            function.addProperty("name", "execute_command");
+            function.addProperty("description", "在服务器后台执行允许的指令（受白名单限制）。");
+            JsonObject parameters = new JsonObject();
+            parameters.addProperty("type", "object");
+            JsonObject properties = new JsonObject();
+            JsonObject command = new JsonObject();
+            command.addProperty("type", "string");
+            command.addProperty("description", "要执行的命令，不需要以 / 开头");
+            properties.add("command", command);
+            parameters.add("properties", properties);
+            JsonArray required = new JsonArray();
+            required.add("command");
+            parameters.add("required", required);
+            function.add("parameters", parameters);
+            tool.add("function", function);
+            tools.add(tool);
+        }
+
         if (tools.size() > 0) {
             requestBody.add("tools", tools);
         }
+    }
+
+    private boolean commandWhitelistManagerEnabled() {
+        CommandWhitelistManager manager = plugin.getCommandWhitelistManager();
+        return manager != null && manager.isEnabled();
     }
 
     /**
@@ -628,6 +699,14 @@ public class AiApiClient {
 
         // 场景二：没有知识库信息，AI 需要判断是否使用工具。
         // 在此场景下，才添加所有可用的工具指令。
+
+        basePrompt += "\n\n# 工具使用原则\n"
+                + "1) 只有在确实需要外部能力时才使用工具；能直接回答就直接回答。\n"
+                + "2) 不要为了“看起来更聪明”而调用工具；避免重复调用同一工具。\n"
+                + "3) 本地知识库查询工具 query_knowledge 最多调用 2 次；超过次数请改为直接回答或说明信息不足。\n"
+                + "4) 后台指令 execute_command 仅用于必要的服务器操作，且必须符合白名单；不要尝试绕过限制。\n"
+                + "5) 图像生成 create_image 仅在玩家明确要求“画图/生成图片/参考图”等时才调用。\n"
+                + "6) 工具调用由系统处理，请勿输出任何 XML 标签格式的伪工具指令。\n";
 
         // 添加知识库查询工具指令
         if (configManager.isKnowledgeEnabled()) {

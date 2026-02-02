@@ -13,6 +13,7 @@
 - 💰 **经济扣费**: 可选启用 Vault/CMI 经济扣费，每次调用 AI 自动收取费用
 - ⚙️ **高度可配置**: 支持自定义 API、模型、提示词等
 - 🔒 **权限管理**: 支持权限控制，可设置所有人可用或特定权限
+- 🧰 **后台指令执行**: AI 可在后台调用白名单指令（可热更新）
 
 ## 使用方式
 
@@ -190,6 +191,23 @@ features:
 
   # 是否启用调试模式（排查问题时启用）
   debug_mode: false
+
+### AI 指令白名单
+
+AI 后台指令白名单使用独立配置文件 `command-whitelist.yml`（位于插件数据目录）。
+
+```yaml
+enabled: true
+whitelist:
+  - "say"
+  - "time"
+```
+
+#### 管理指令（OP）
+- `/aicmdwl list` 查看白名单
+- `/aicmdwl add <command>` 添加指令
+- `/aicmdwl remove <command>` 删除指令
+- `/aicmdwl reload` 重新加载配置
 
 ### 经济扣费配置（可选）
 

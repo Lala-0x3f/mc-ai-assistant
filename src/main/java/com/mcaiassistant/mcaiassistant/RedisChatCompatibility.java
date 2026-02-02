@@ -29,6 +29,8 @@ public class RedisChatCompatibility implements Listener {
     private final ChatListener chatListener;
     private final ToastNotification toastNotification;
     private final GlobalMemoryManager globalMemoryManager;
+    private final RateLimitManager rateLimitManager;
+    private final EconomyManager economyManager;
     
     private boolean redisChatEnabled = false;
     private Class<?> redisChatEventClass;
@@ -38,7 +40,8 @@ public class RedisChatCompatibility implements Listener {
     public RedisChatCompatibility(McAiAssistant plugin, ConfigManager configManager,
                                  ChatHistoryManager chatHistoryManager, AiApiClient aiApiClient,
                                  SearchApiClient searchApiClient, ChatListener chatListener,
-                                 ToastNotification toastNotification, GlobalMemoryManager globalMemoryManager) {
+                                 ToastNotification toastNotification, GlobalMemoryManager globalMemoryManager,
+                                 RateLimitManager rateLimitManager, EconomyManager economyManager) {
         this.plugin = plugin;
         this.configManager = configManager;
         this.chatHistoryManager = chatHistoryManager;
@@ -47,6 +50,8 @@ public class RedisChatCompatibility implements Listener {
         this.chatListener = chatListener;
         this.toastNotification = toastNotification;
         this.globalMemoryManager = globalMemoryManager;
+        this.rateLimitManager = rateLimitManager;
+        this.economyManager = economyManager;
         
         initializeRedisChatSupport();
     }
@@ -205,6 +210,23 @@ public class RedisChatCompatibility implements Listener {
                     return;
                 }
 
+                // 检查速率限制
+                if (rateLimitManager != null && !rateLimitManager.canMakeRequest(player)) {
+                    String limitMessage = rateLimitManager.getRateLimitMessage();
+                    String formattedMessage = ChatColor.translateAlternateColorCodes('&', limitMessage);
+                    player.sendMessage(ChatColor.RED + formattedMessage);
+                    return;
+                }
+
+                // 经济预检：余额不足则直接提示并终止，不进入搜索请求
+                EconomyManager.EconomyChargeResult preCheck = economyManager != null ? economyManager.preCheck(player) : EconomyManager.EconomyChargeResult.skipped("未启用经济扣费");
+                if (!preCheck.isSuccess() && !preCheck.isSkipped()) {
+                    String template = configManager.getEconomyInsufficientMessage();
+                    String msg = formatEconomyMessage(template, configManager.getEconomyCostPerUse(), preCheck.getErrorMessage());
+                    player.sendMessage(ChatColor.translateAlternateColorCodes('&', msg));
+                    return;
+                }
+
                 // 异步处理搜索请求
                 handleRedisChatSearchRequest(player, message);
                 return;
@@ -224,6 +246,23 @@ public class RedisChatCompatibility implements Listener {
                     if (configManager.isDebugMode()) {
                         plugin.getLogger().info("玩家 " + player.getName() + " 没有使用 AI 的权限");
                     }
+                    return;
+                }
+
+                // 检查速率限制
+                if (rateLimitManager != null && !rateLimitManager.canMakeRequest(player)) {
+                    String limitMessage = rateLimitManager.getRateLimitMessage();
+                    String formattedMessage = ChatColor.translateAlternateColorCodes('&', limitMessage);
+                    player.sendMessage(ChatColor.RED + formattedMessage);
+                    return;
+                }
+
+                // 经济预检：余额不足则直接提示并终止，不进入 AI 请求
+                EconomyManager.EconomyChargeResult preCheck = economyManager != null ? economyManager.preCheck(player) : EconomyManager.EconomyChargeResult.skipped("未启用经济扣费");
+                if (!preCheck.isSuccess() && !preCheck.isSkipped()) {
+                    String template = configManager.getEconomyInsufficientMessage();
+                    String msg = formatEconomyMessage(template, configManager.getEconomyCostPerUse(), preCheck.getErrorMessage());
+                    player.sendMessage(ChatColor.translateAlternateColorCodes('&', msg));
                     return;
                 }
 
@@ -253,6 +292,25 @@ public class RedisChatCompatibility implements Listener {
 
         // 显示通知
         showProcessingNotifications(player);
+
+        EconomyManager.EconomyChargeResult chargeResult = null;
+        if (economyManager != null && economyManager.isActive()) {
+            chargeResult = economyManager.chargePlayer(player);
+            if (chargeResult != null && !chargeResult.isSkipped() && !chargeResult.isSuccess()) {
+                if (rateLimitManager != null) {
+                    rateLimitManager.recordRequest(player);
+                }
+                // 扣费失败时直接返回
+                return;
+            }
+            if (rateLimitManager != null) {
+                rateLimitManager.recordRequest(player);
+            }
+        } else if (rateLimitManager != null) {
+            rateLimitManager.recordRequest(player);
+        }
+
+        final EconomyManager.EconomyChargeResult finalChargeResult = chargeResult;
         
         // 异步调用 AI API
         CompletableFuture<List<String>> contextFuture = CompletableFuture.supplyAsync(() -> {
@@ -297,7 +355,14 @@ public class RedisChatCompatibility implements Listener {
         })).thenAccept(response -> {
             // 在主线程中发送响应
             Bukkit.getScheduler().runTask(plugin, () -> {
-                chatListener.sendAiResponse(response, player, cleanMessage, null);
+                if (response == null || (response.getContent() != null && response.getContent().trim().isEmpty() && !response.hasToolCalls())) {
+                    if (finalChargeResult != null && finalChargeResult.isSuccess()) {
+                        economyManager.refund(player, finalChargeResult.getCost());
+                    }
+                    player.sendMessage(ChatColor.RED + "抱歉，AI 助手暂时无法响应，请稍后再试。");
+                    return;
+                }
+                chatListener.sendAiResponse(response, player, cleanMessage, finalChargeResult);
             });
         });
     }
@@ -344,6 +409,24 @@ public class RedisChatCompatibility implements Listener {
         // 显示通知
         showProcessingNotifications(player);
 
+        EconomyManager.EconomyChargeResult chargeResult = null;
+        if (economyManager != null && economyManager.isActive()) {
+            chargeResult = economyManager.chargePlayer(player);
+            if (chargeResult != null && !chargeResult.isSkipped() && !chargeResult.isSuccess()) {
+                if (rateLimitManager != null) {
+                    rateLimitManager.recordRequest(player);
+                }
+                return;
+            }
+            if (rateLimitManager != null) {
+                rateLimitManager.recordRequest(player);
+            }
+        } else if (rateLimitManager != null) {
+            rateLimitManager.recordRequest(player);
+        }
+
+        final EconomyManager.EconomyChargeResult finalChargeResult = chargeResult;
+
         // 异步调用搜索 API
         CompletableFuture.supplyAsync(() -> {
             try {
@@ -374,9 +457,27 @@ public class RedisChatCompatibility implements Listener {
                     plugin.getLogger().info("搜索查询: " + searchResult.getSearchQuery());
                     plugin.getLogger().info("搜索结果长度: " + (searchResult.getResultText() != null ? searchResult.getResultText().length() : 0));
                 }
+                boolean needRefund = searchResult == null || searchResult.getResultText() == null || searchResult.getResultText().trim().isEmpty()
+                        || "搜索失败".equals(searchResult.getSearchQuery());
+                if (needRefund && finalChargeResult != null && finalChargeResult.isSuccess()) {
+                    economyManager.refund(player, finalChargeResult.getCost());
+                }
                 chatListener.sendSearchResponse(searchResult);
             });
         });
+    }
+
+    private String formatEconomyMessage(String template, double cost, String reason) {
+        String message = template == null ? "" : template;
+        message = message.replace("{cost}", formatCost(cost));
+        if (reason != null) {
+            message = message.replace("{reason}", reason);
+        }
+        return message;
+    }
+
+    private String formatCost(double cost) {
+        return String.format("%.2f", cost);
     }
 
     /**
