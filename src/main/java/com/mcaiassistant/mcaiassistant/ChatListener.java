@@ -16,6 +16,7 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -40,6 +41,7 @@ public class ChatListener implements Listener {
     private final ToastNotification toastNotification;
     private final RateLimitManager rateLimitManager;
     private final EconomyManager economyManager;
+    private final GlobalMemoryManager globalMemoryManager;
     
     // 智能匹配模式，避免匹配到 @airport 等词
     private static final Pattern SMART_AI_PATTERN = Pattern.compile("(?:^|\\s)@ai(?:\\s|$|[^a-zA-Z])", Pattern.CASE_INSENSITIVE);
@@ -52,7 +54,8 @@ public class ChatListener implements Listener {
                        ChatHistoryManager chatHistoryManager, AiApiClient aiApiClient,
                        SearchApiClient searchApiClient, KnowledgeBaseManager knowledgeBaseManager,
                        ImageApiClient imageApiClient, ToastNotification toastNotification,
-                       RateLimitManager rateLimitManager, EconomyManager economyManager) {
+                       RateLimitManager rateLimitManager, EconomyManager economyManager,
+                       GlobalMemoryManager globalMemoryManager) {
         this.plugin = plugin;
         this.configManager = configManager;
         this.chatHistoryManager = chatHistoryManager;
@@ -63,6 +66,7 @@ public class ChatListener implements Listener {
         this.toastNotification = toastNotification;
         this.rateLimitManager = rateLimitManager;
         this.economyManager = economyManager;
+        this.globalMemoryManager = globalMemoryManager;
     }
     
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
@@ -411,6 +415,10 @@ public class ChatListener implements Listener {
             if (configManager.isDebugMode()) {
                 plugin.getLogger().info("[经济扣费] 已在响应后提示余额，玩家: " + requestPlayer.getName());
             }
+        }
+        // AI 响应包含 mark 时，后台判定是否写入全局记忆
+        if (hasMarkTag(response)) {
+            processMemoryDecisionAsync(originalMessage, response, requestPlayer != null ? requestPlayer.getName() : "AI");
         }
     }
 
@@ -928,23 +936,29 @@ public class ChatListener implements Listener {
         String formattedMessage = ChatColor.AQUA + aiPrefix + ChatColor.WHITE + cleanResponse;
 
         if (configManager.isDebugMode()) {
-            plugin.getLogger().info("[知识库查询] 格式化后消息长度: " + formattedMessage.length() + " 字符");
-            plugin.getLogger().info("[知识库查询] 📢 广播消息给所有在线玩家");
+            plugin.getLogger().info("[知识库查询] 格式化消息长度: " + formattedMessage.length());
         }
 
-        // 广播消息给所有在线玩家
+        // 广播信息给所有玩家
         Bukkit.broadcastMessage(formattedMessage);
 
-        // 记录到聊天历史
+        // 记录聊天历史
         if (configManager.isChatLoggingEnabled()) {
             chatHistoryManager.addMessage(aiName, cleanResponse);
             if (configManager.isDebugMode()) {
-                plugin.getLogger().info("[知识库查询] ✅ 已记录到聊天历史");
+                plugin.getLogger().info("[知识库查询] ✅ 已记录聊天历史");
             }
         } else {
             if (configManager.isDebugMode()) {
-                plugin.getLogger().info("[知识库查询] 聊天日志功能未启用，跳过记录");
+                plugin.getLogger().info("[知识库查询] 日志未启用，跳过记录");
             }
+        }
+
+        // 知识库查询的回复即便含有 mark，也不触发全局记忆判定，避免误将知识库摘要写入长期记忆
+
+        if (configManager.isDebugMode()) {
+            plugin.getLogger().info("[知识库查询] ✅ 完成 AI 响应发送");
+            plugin.getLogger().info("[知识库查询] 最终响应内容: " + cleanResponse);
         }
 
         if (configManager.isDebugMode()) {
@@ -1077,6 +1091,116 @@ public class ChatListener implements Listener {
         return String.format("%.2f", cost);
     }
 
+    /**
+     * 检查是否包含 mark 标签
+     */
+    private boolean hasMarkTag(String response) {
+        if (response == null) {
+            return false;
+        }
+        return Pattern.compile("<mark\\b[^>]*>", Pattern.CASE_INSENSITIVE).matcher(response).find();
+    }
+
+    /**
+     * 移除 mark 标签（展示用）
+     */
+    private String removeMarkTags(String response) {
+        if (response == null || response.isEmpty()) {
+            return response;
+        }
+        String withoutPair = response.replaceAll("(?s)<mark>(.*?)</mark>", "$1");
+        return withoutPair.replaceAll("<mark\\s+content=\"([^\"]*)\"\\s*/>", "$1").replaceAll("<mark\\s*/>", "");
+    }
+
+    /**
+     * 后台调用 AI 判定是否写入/更新记忆，提供上下文与现有记忆
+     */
+    private void processMemoryDecisionAsync(String userMessage, String aiResponse, String source) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                List<String> context = new ArrayList<>();
+                if (configManager.isContextEnabled()) {
+                    List<String> history = chatHistoryManager.getRecentMessages(configManager.getContextMessages());
+                    if (history != null) {
+                        context.addAll(history);
+                    }
+                }
+                List<String> memories = globalMemoryManager.pickMemories(userMessage != null ? userMessage : aiResponse);
+                List<String> actions = decideMemoryWithContext(userMessage, aiResponse, context, memories);
+                if (actions != null) {
+                    for (String summary : actions) {
+                        globalMemoryManager.captureBySummaryAsync(source, summary);
+                    }
+                }
+            } catch (Exception e) {
+                if (configManager.isDebugMode()) {
+                    plugin.getLogger().warning("[全局记忆] 后台判定失败: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    /**
+     * 构造判定提示，要求 AI 输出 ADD/UPDATE 行
+     */
+    private List<String> decideMemoryWithContext(String userMessage, String aiResponse, List<String> context, List<String> memories) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("你是“长期记忆决策器”，决定是否新增/更新全局记忆。只保留长期有用的事实、规则、数值、坐标、指令。\n");
+        sb.append("输出格式：每行 `ADD: <摘要>` 或 `UPDATE: <摘要>`；无记忆时输出 `NONE`。摘要要简短并保留关键数字/坐标/条件。\n");
+        sb.append("\n[用户消息]\n").append(userMessage == null ? "" : userMessage);
+        sb.append("\n[AI 回复]\n").append(aiResponse == null ? "" : aiResponse);
+        sb.append("\n[近期上下文]\n");
+        if (context != null) {
+            for (String c : context) {
+                sb.append("- ").append(c).append("\n");
+            }
+        }
+        sb.append("[已有相关记忆]\n");
+        if (memories != null) {
+            for (String m : memories) {
+                sb.append("- ").append(m).append("\n");
+            }
+        }
+        try {
+            String decisionText = aiApiClient.sendMessage(sb.toString(), null);
+            return parseMemoryActions(decisionText);
+        } catch (Exception e) {
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().warning("[全局记忆] 判定调用失败: " + e.getMessage());
+            }
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * 解析 AI 返回的 ADD/UPDATE 行
+     */
+    private List<String> parseMemoryActions(String text) {
+        List<String> summaries = new ArrayList<>();
+        if (text == null) {
+            return summaries;
+        }
+        String[] lines = text.split("\\r?\\n");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty() || trimmed.equalsIgnoreCase("NONE")) {
+                continue;
+            }
+            if (trimmed.toUpperCase().startsWith("ADD:")) {
+                String summary = trimmed.substring(4).trim();
+                if (!summary.isEmpty()) {
+                    summaries.add(summary);
+                }
+            } else if (trimmed.toUpperCase().startsWith("UPDATE:")) {
+                String summary = trimmed.substring(7).trim();
+                if (!summary.isEmpty()) {
+                    summaries.add(summary);
+                }
+            }
+        }
+        return summaries;
+    }
+
     private static class ResponseWrapper {
         private String response;
         private boolean failed;
@@ -1094,3 +1218,4 @@ public class ChatListener implements Listener {
         processedMessages.entrySet().removeIf(entry -> entry.getValue() < expirationTime);
     }
 }
+

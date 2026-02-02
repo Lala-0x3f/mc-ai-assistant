@@ -15,6 +15,7 @@ public class McAiAssistant extends JavaPlugin {
     private ModelManager modelManager;
     private ChatListener chatListener;
     private ChatHistoryManager chatHistoryManager;
+    private GlobalMemoryManager globalMemoryManager;
     private AiApiClient aiApiClient;
     private SearchApiClient searchApiClient;
     private KnowledgeBaseManager knowledgeBaseManager;
@@ -39,13 +40,16 @@ public class McAiAssistant extends JavaPlugin {
         
         // 初始化聊天记录管理器
         chatHistoryManager = new ChatHistoryManager();
-        
+
+        // 初始化全局记忆管理器（相关性检索 + 摘要写入）
+        globalMemoryManager = new GlobalMemoryManager(this, configManager);
+        globalMemoryManager.initialize();
+
         // 初始化 AI API 客户端
         aiApiClient = new AiApiClient(configManager, modelManager);
- 
+
         // 初始化搜索 API 客户端
         searchApiClient = new SearchApiClient(configManager);
-
         // 初始化本地知识库管理器
         knowledgeBaseManager = new KnowledgeBaseManager(this, configManager);
         knowledgeBaseManager.initialize();
@@ -64,7 +68,7 @@ public class McAiAssistant extends JavaPlugin {
         economyManager.initialize();
 
         // 注册聊天监听器
-        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager, economyManager);
+        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager, economyManager, globalMemoryManager);
         getServer().getPluginManager().registerEvents(chatListener, this);
 
         // 注册 /model 指令与补全
@@ -86,7 +90,7 @@ public class McAiAssistant extends JavaPlugin {
         }
  
         // 初始化 RedisChat 兼容性
-        redisChatCompatibility = new RedisChatCompatibility(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, chatListener, toastNotification);
+        redisChatCompatibility = new RedisChatCompatibility(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, chatListener, toastNotification, globalMemoryManager);
         
         // 启动定时任务清理过期的速率限制记录
         getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
@@ -184,6 +188,9 @@ public class McAiAssistant extends JavaPlugin {
         aiApiClient.updateConfig(configManager);
         knowledgeBaseManager.updateConfig(configManager);
         rateLimitManager.updateConfig(configManager);
+        if (globalMemoryManager != null) {
+            globalMemoryManager.updateConfig(configManager);
+        }
         redisChatCompatibility.updateConfig(configManager);
         if (economyManager != null) {
             economyManager.reload();
@@ -195,3 +202,5 @@ public class McAiAssistant extends JavaPlugin {
         getLogger().info("配置已重载");
     }
 }
+
+

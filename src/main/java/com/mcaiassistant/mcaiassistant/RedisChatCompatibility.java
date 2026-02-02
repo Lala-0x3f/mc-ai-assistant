@@ -10,6 +10,7 @@ import org.bukkit.plugin.EventExecutor;
 import org.bukkit.plugin.Plugin;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
@@ -27,6 +28,7 @@ public class RedisChatCompatibility implements Listener {
     private final SearchApiClient searchApiClient;
     private final ChatListener chatListener;
     private final ToastNotification toastNotification;
+    private final GlobalMemoryManager globalMemoryManager;
     
     private boolean redisChatEnabled = false;
     private Class<?> redisChatEventClass;
@@ -36,7 +38,7 @@ public class RedisChatCompatibility implements Listener {
     public RedisChatCompatibility(McAiAssistant plugin, ConfigManager configManager,
                                  ChatHistoryManager chatHistoryManager, AiApiClient aiApiClient,
                                  SearchApiClient searchApiClient, ChatListener chatListener,
-                                 ToastNotification toastNotification) {
+                                 ToastNotification toastNotification, GlobalMemoryManager globalMemoryManager) {
         this.plugin = plugin;
         this.configManager = configManager;
         this.chatHistoryManager = chatHistoryManager;
@@ -44,6 +46,7 @@ public class RedisChatCompatibility implements Listener {
         this.searchApiClient = searchApiClient;
         this.chatListener = chatListener;
         this.toastNotification = toastNotification;
+        this.globalMemoryManager = globalMemoryManager;
         
         initializeRedisChatSupport();
     }
@@ -245,36 +248,53 @@ public class RedisChatCompatibility implements Listener {
             plugin.getLogger().info("处理 RedisChat AI 请求: " + player.getName() + " -> " + cleanMessage);
         }
 
+        // 记录全局记忆：异步判定+摘要，避免阻塞
+        globalMemoryManager.captureIfValuableAsync(player.getName(), cleanMessage);
+
         // 显示通知
         showProcessingNotifications(player);
         
         // 异步调用 AI API
-        CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<List<String>> contextFuture = CompletableFuture.supplyAsync(() -> {
             try {
-                // 获取上下文消息（包含所有消息，包括AI响应）
-                return configManager.isContextEnabled() ?
-                    chatHistoryManager.getRecentMessages(configManager.getContextMessages()) : null;
-            } catch (Exception e) {
-                plugin.getLogger().severe("获取聊天上下文失败: " + e.getMessage());
-                return null;
-            }
-        }).thenCompose(context -> {
-            return CompletableFuture.supplyAsync(() -> {
-                try {
-                    if (Bukkit.isPrimaryThread() && configManager.isDebugMode()) {
-                        plugin.getLogger().warning("警告: 尝试在主线程调用 aiApiClient.sendMessage，这会导致卡顿");
+                List<String> context = new ArrayList<>();
+                if (configManager.isContextEnabled()) {
+                    List<String> history = chatHistoryManager.getRecentMessages(configManager.getContextMessages());
+                    if (history != null) {
+                        context.addAll(history);
                     }
-                    return aiApiClient.sendMessage(cleanMessage, context);
-                } catch (Exception e) {
-                    plugin.getLogger().severe("RedisChat AI API 调用失败: " + e.getMessage());
-                    if (configManager.isDebugMode()) {
-                        plugin.getLogger().severe("RedisChat AI API 调用异常详情:");
-                        e.printStackTrace();
-                    }
-                    return "抱歉，AI 助手暂时无法响应，请稍后再试。技术详情: " + e.getMessage();
                 }
-            });
-        }).thenAccept(response -> {
+                List<String> memorySnippets = globalMemoryManager.pickMemories(cleanMessage);
+                if (memorySnippets != null && !memorySnippets.isEmpty()) {
+                    for (String mem : memorySnippets) {
+                        context.add(0, "【全局记忆】" + mem);
+                    }
+                }
+                if (configManager.isDebugMode()) {
+                    plugin.getLogger().info("[RedisChat] 上下文条数: " + context.size() + "，全局记忆片段: " + (memorySnippets == null ? 0 : memorySnippets.size()));
+                }
+                return context;
+            } catch (Exception e) {
+                plugin.getLogger().severe("获取上下文失败: " + e.getMessage());
+                return new ArrayList<>();
+            }
+        });
+
+        contextFuture.thenCompose((List<String> context) -> CompletableFuture.supplyAsync(() -> {
+            try {
+                if (Bukkit.isPrimaryThread() && configManager.isDebugMode()) {
+                    plugin.getLogger().warning("警告: 尝试在主线程调用 aiApiClient.sendMessage，这会导致卡顿");
+                }
+                return aiApiClient.sendMessage(cleanMessage, (context == null || context.isEmpty()) ? null : context);
+            } catch (Exception e) {
+                plugin.getLogger().severe("RedisChat AI API 调用失败: " + e.getMessage());
+                if (configManager.isDebugMode()) {
+                    plugin.getLogger().severe("RedisChat AI API 调用异常详情:");
+                    e.printStackTrace();
+                }
+                return "抱歉，AI 助手暂时无法响应，请稍后再试。错误: " + e.getMessage();
+            }
+        })).thenAccept(response -> {
             // 在主线程中发送响应
             Bukkit.getScheduler().runTask(plugin, () -> {
                 chatListener.sendAiResponse(response, player, cleanMessage, null);

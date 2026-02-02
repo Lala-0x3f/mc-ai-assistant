@@ -304,4 +304,33 @@ public class ConfigManager {
     public String getRateLimitMessage() {
         return config.getString("rate_limit.limit_message", "⚠️ 您的请求过于频繁，请稍后再试。每分钟最多 {limit} 次请求。");
     }
+    // 全局记忆配置（简易规则 + 摘要）
+    public boolean isGlobalMemoryEnabled() {
+        return config.getBoolean("global_memory.enabled", false);
+    }
+
+    public int getGlobalMemoryMinLength() {
+        return config.getInt("global_memory.min_length", 12);
+    }
+
+    public int getGlobalMemoryMinInfoScore() {
+        return config.getInt("global_memory.min_info_score", 2);
+    }
+
+    public int getGlobalMemoryMaxEntries() {
+        return config.getInt("global_memory.max_entries", 50);
+    }
+
+    public int getGlobalMemoryMaxSummaryLength() {
+        return config.getInt("global_memory.max_summary_length", 200);
+    }
+
+    public int getGlobalMemoryInjectCount() {
+        return config.getInt("global_memory.max_inject_entries", 3);
+    }
+
+    public int getGlobalMemoryInjectCharLimit() {
+        return config.getInt("global_memory.max_inject_chars", 320);
+    }
+
 }
