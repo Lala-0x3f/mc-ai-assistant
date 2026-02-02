@@ -285,14 +285,14 @@ public class RedisChatCompatibility implements Listener {
                 if (Bukkit.isPrimaryThread() && configManager.isDebugMode()) {
                     plugin.getLogger().warning("警告: 尝试在主线程调用 aiApiClient.sendMessage，这会导致卡顿");
                 }
-                return aiApiClient.sendMessage(cleanMessage, (context == null || context.isEmpty()) ? null : context);
+                return aiApiClient.sendMessageWithTools(cleanMessage, (context == null || context.isEmpty()) ? null : context);
             } catch (Exception e) {
                 plugin.getLogger().severe("RedisChat AI API 调用失败: " + e.getMessage());
                 if (configManager.isDebugMode()) {
                     plugin.getLogger().severe("RedisChat AI API 调用异常详情:");
                     e.printStackTrace();
                 }
-                return "抱歉，AI 助手暂时无法响应，请稍后再试。错误: " + e.getMessage();
+                return new AiApiClient.AiResponse("抱歉，AI 助手暂时无法响应，请稍后再试。错误: " + e.getMessage(), null);
             }
         })).thenAccept(response -> {
             // 在主线程中发送响应

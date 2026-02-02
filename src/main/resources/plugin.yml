@@ -1,5 +1,5 @@
 name: McAiAssistant
-version: '0.1.4-rc4'
+version: '0.2.0-rc1'
 main: com.mcaiassistant.mcaiassistant.McAiAssistant
 api-version: '1.21'
 description: AI Assistant plugin for PaperMC 1.21.4

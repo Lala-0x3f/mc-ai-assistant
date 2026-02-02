@@ -18,25 +18,25 @@
 2. 如果用户询问"如何做"、"怎么用"、"什么指令"等制作类问题
 3. 如果用户提到任何插件名称（WorldEdit、FAWE、VoxelSniper、Plots、Axiom等）
 4. 如果用户询问建筑技巧、地形制作、导入导出等功能
-你都必须在回答前添加：<query_knowledge query="查询内容" />
+你都必须在回答前触发工具调用：query_knowledge(query="查询内容")
 
 🎯 查询示例（严格按照格式）：
-- 用户问"怎么做丘陵地貌" → <query_knowledge query="地形制作 丘陵地貌 VoxelSniper，FAWE，Axiom制作地形" />
-- 用户问"如何导入建筑" → <query_knowledge query="用WorldEdit和Axiom导入导出建筑" />
-- 用户问"Plots指令" → <query_knowledge query="Plots 地皮系统的常用指令" />
-- 用户问"建筑技巧" → <query_knowledge query="建筑技巧 中式古典建筑 欧式建筑" />
-- 用户问"服务器指令" → <query_knowledge query="服务器基础指令 插件指令" />
+- 用户问"怎么做丘陵地貌" → query_knowledge(query="地形制作 丘陵地貌 VoxelSniper，FAWE，Axiom制作地形")
+- 用户问"如何导入建筑" → query_knowledge(query="用WorldEdit和Axiom导入导出建筑")
+- 用户问"Plots指令" → query_knowledge(query="Plots 地皮系统的常用指令")
+- 用户问"建筑技巧" → query_knowledge(query="建筑技巧 中式古典建筑 欧式建筑")
+- 用户问"服务器指令" → query_knowledge(query="服务器基础指令 插件指令")
 
 ❗ 绝对不允许直接回答而不查询知识库！必须先查询再回答！
 ```
 
 ### 新提示词（简洁，约50字）
 ```
-重要：如果用户询问的内容与知识库有任何联系，你必须添加搜索标签：
+重要：如果用户询问的内容与知识库有任何联系，你必须触发工具调用：
 知识库包含：[配置内容]
 
-搜索标签格式：<query_knowledge query="用户问题关键词" />
-这是一个搜索标签，用于查询知识库。
+工具调用格式：query_knowledge(query="用户问题关键词")
+这是一个工具调用，用于查询知识库。
 ```
 
 ## 🎯 简化原则
@@ -50,12 +50,12 @@
 ### 2. 保留核心要素
 - ✅ 明确触发条件："与知识库有任何联系"
 - ✅ 强制要求："必须添加搜索标签"
-- ✅ 标签格式：`<query_knowledge query="..." />`
-- ✅ 功能说明："这是一个搜索标签"
+- ✅ 工具格式：`query_knowledge(query="...")`
+- ✅ 功能说明："这是一个工具调用"
 
 ### 3. 简化语言
 - **原来**："你必须无条件先查询知识库"
-- **现在**："你必须添加搜索标签"
+- **现在**："你必须触发工具调用"
 
 - **原来**："绝对不允许直接回答而不查询知识库"
 - **现在**："这是一个搜索标签，用于查询知识库"
@@ -68,8 +68,8 @@
 if (configManager.isKnowledgeEnabled()) {
     String knowledgeInstructions = "\n\n重要：如果用户询问的内容与知识库有任何联系，你必须添加搜索标签：\n" +
                  "知识库包含：" + configManager.getKnowledgeContent() + "\n\n" +
-                 "搜索标签格式：<query_knowledge query=\"用户问题关键词\" />\n" +
-                 "这是一个搜索标签，用于查询知识库。";
+                 "工具调用格式：query_knowledge(query=\"用户问题关键词\")\n" +
+                 "这是一个工具调用，用于查询知识库。";
 
     basePrompt += knowledgeInstructions;
 }
@@ -106,13 +106,13 @@ mvn clean package -DskipTests
 ```
 
 ### 2. 测试相同问题
-再次测试"@ai 怎么做丘陵地貌"，观察是否生成搜索标签。
+再次测试"@ai 怎么做丘陵地貌"，观察是否触发工具调用。
 
 ### 3. 观察调试日志
 ```
 [知识库查询] ✅ 已添加知识库查询指令到系统提示词
 [知识库查询] 📥 收到 AI 响应，开始处理
-[知识库查询] 完整响应内容: [应该包含<query_knowledge>标签]
+[知识库查询] 完整响应内容: [应该包含知识库工具调用]
 ```
 
 ### 4. 验证不同问题
