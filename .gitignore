@@ -118,3 +118,6 @@ yarn.lock
 
 # 本地临时测试目录，不纳入版本控制
 local-tests/
+
+# Serena 本地元数据
+.serena/

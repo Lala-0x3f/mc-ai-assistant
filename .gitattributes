@@ -2,14 +2,14 @@
 * text=auto
 
 # 明确声明你想要始终规范化并转换为本地行结束符的文件
-*.java text
-*.xml text
-*.yml text
-*.yaml text
-*.md text
-*.txt text
-*.properties text
-*.json text
+*.java text eol=lf
+*.xml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.properties text eol=lf
+*.json text eol=lf
 
 # 声明你想要始终保持 LF 行结束符的文件（即使在 Windows 上）
 *.sh text eol=lf
