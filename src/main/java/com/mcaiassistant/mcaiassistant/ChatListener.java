@@ -502,11 +502,13 @@ public class ChatListener implements Listener {
                         if (knowledgeCalls > 2) {
                             toolResult = "已达到 query_knowledge 最大调用次数(2)，本次查询被跳过。";
                         } else {
+                            notifyToolCall(player, "知识库查询");
                             toolResult = runKnowledgeTool(call);
                         }
                         appendToolMessage(messages, call, toolResult);
                         break;
                     case "execute_command":
+                        notifyToolCall(player, "后台指令");
                         toolResult = runCommandTool(call);
                         appendToolMessage(messages, call, toolResult);
                         break;
@@ -565,6 +567,16 @@ public class ChatListener implements Listener {
         toolMessage.addProperty("tool_call_id", toolCall.getId());
         toolMessage.addProperty("content", toolResultContent == null ? "" : toolResultContent);
         messages.add(toolMessage);
+    }
+
+    private void notifyToolCall(Player player, String toolName) {
+        if (player == null || toolName == null || toolName.trim().isEmpty()) {
+            return;
+        }
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            String aiPrefix = configManager.getAiPrefix();
+            player.sendMessage(ChatColor.AQUA + aiPrefix + ChatColor.WHITE + "已调用" + toolName);
+        });
     }
 
     private String runKnowledgeTool(AiApiClient.ToolCall call) {

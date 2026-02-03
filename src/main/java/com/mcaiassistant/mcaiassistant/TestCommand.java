@@ -13,10 +13,11 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * /aitest 指令
- * - /aitest all   同时测试模型与知识库
- * - /aitest model 仅测试模型可用性
- * - /aitest kb    仅测试知识库可用性
+ * AI 健康检查指令
+ * - /ai test all   同时测试模型与知识库
+ * - /ai test model 仅测试模型可用性
+ * - /ai test kb    仅测试知识库可用性
+ * - /aitest        兼容旧指令
  * 仅 OP（mcaiassistant.test）可执行
  */
 public class TestCommand implements CommandExecutor, TabCompleter {

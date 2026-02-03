@@ -204,10 +204,12 @@ whitelist:
 ```
 
 #### 管理指令（OP）
-- `/aicmdwl list` 查看白名单
-- `/aicmdwl add <command>` 添加指令
-- `/aicmdwl remove <command>` 删除指令
-- `/aicmdwl reload` 重新加载配置
+- `/ai whitelist list` 查看白名单
+- `/ai whitelist add <command>` 添加指令
+- `/ai whitelist remove <command>` 删除指令
+- `/ai whitelist reload` 重新加载配置
+
+兼容旧指令：`/aicmdwl ...`，也可使用简写 `/ai cmdwl ...`
 
 ### 经济扣费配置（可选）
 
@@ -616,7 +618,17 @@ features:
 - 在高负载服务器上考虑禁用 `enable_chat_logging`
 - 生产环境中关闭 `debug_mode`
 
-## 模型切换与 /model 指令
+## /ai 管理指令（统一入口）
+
+- `/ai info` 查看插件与模型信息
+- `/ai tools` 查看启用的工具（知识库/图像/后台指令）
+- `/ai model [modelId]` 查看或切换聊天模型
+- `/ai test <all|model|kb>` 健康检查（模型/知识库）
+- `/ai whitelist <list|add|remove|reload>` 管理白名单
+
+兼容旧指令：`/model`、`/aitest`、`/aicmdwl`
+
+## 模型切换与 /ai model 指令
 
 通过一个简单的指令即可在运行时切换聊天使用的 AI 模型。默认模型仍取自配置文件 `ai.model`，未设置覆盖时生效。
 
@@ -624,17 +636,17 @@ features:
 
 - 查看当前“有效模型”（及来源：覆盖/配置）
   ```
-  /model
+  /ai model
   ```
 - 切换到指定模型
   ```
-  /model <modelId>
+  /ai model <modelId>
   ```
   示例：
   ```
-  /model gpt-4o-mini
-  /model o4-mini
-  /model llama-3.1-8b-instruct
+  /ai model gpt-4o-mini
+  /ai model o4-mini
+  /ai model llama-3.1-8b-instruct
   ```
 
 说明：
@@ -643,20 +655,20 @@ features:
 
 ### 自动补全（动态模型列表）
 
-- 输入 `/model ` 后，Tab 自动补全候选来自 OpenAI 风格的 `/models` 接口；
+- 输入 `/ai model ` 后，Tab 自动补全候选来自 OpenAI 风格的 `/models` 接口；
 - 列表缓存默认 10 分钟，首次或过期会异步刷新，不阻塞主线程；
 - 如果 `/models` 接口不可用或返回不全，仍允许设置任意 `modelId`，并在聊天中提示“未在列表中发现”。
 
 ### 权限
 
-- 默认需要 `mcaiassistant.admin` 才能使用 `/model`；
+- 默认需要 `mcaiassistant.admin` 才能使用 `/ai model`；
 - 可在 `plugin.yml` 中调整命令权限或用权限插件授予权限。
 
 ### 覆盖策略与回退
 
 - 仅对“聊天用模型”生效，搜索模型仍按配置项工作；
 - 当前“有效模型”优先级：运行时覆盖 &gt; 配置默认；
-- 使用 `/model` 空参可查看当前有效模型与来源。
+- 使用 `/ai model` 空参可查看当前有效模型与来源。
 
 ### 实现参考
 

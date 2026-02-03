@@ -1,5 +1,5 @@
 name: McAiAssistant
-version: '0.2.0-rc2'
+version: '0.2.0-rc3'
 main: com.mcaiassistant.mcaiassistant.McAiAssistant
 api-version: '1.21'
 description: AI Assistant plugin for PaperMC 1.21.4
@@ -25,18 +25,23 @@ permissions:
     default: op
 
 commands:
+  ai:
+    description: AI 统一管理指令
+    usage: "/ai <info|tools|model|test|whitelist> [...]"
+    permission: mcaiassistant.admin
+    permission-message: "没有权限执行该命令。"
   model:
-    description: 查看或切换当前 AI 模型
+    description: 查看或切换当前 AI 模型（兼容旧指令）
     usage: "/model [modelId]"
     permission: mcaiassistant.admin
     permission-message: "没有权限执行该命令。"
   aitest:
-    description: 测试 AI 模型与知识库可用性
+    description: 测试 AI 模型与知识库可用性（兼容旧指令）
     usage: "/aitest <model|kb|all>"
     permission: mcaiassistant.admin
     permission-message: "没有权限执行该命令。"
   aicmdwl:
-    description: 管理 AI 后台指令白名单
+    description: 管理 AI 后台指令白名单（兼容旧指令）
     usage: "/aicmdwl <list|add|remove|reload> [command]"
     permission: mcaiassistant.admin
     permission-message: "没有权限执行该命令。"

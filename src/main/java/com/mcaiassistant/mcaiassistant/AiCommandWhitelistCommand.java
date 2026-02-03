@@ -12,6 +12,8 @@ import java.util.List;
 
 /**
  * AI 指令白名单管理指令
+ * - /ai whitelist <list|add|remove|reload>
+ * - /aicmdwl <list|add|remove|reload>
  */
 public class AiCommandWhitelistCommand implements CommandExecutor, TabCompleter {
 
@@ -30,7 +32,7 @@ public class AiCommandWhitelistCommand implements CommandExecutor, TabCompleter 
             return true;
         }
         if (args.length == 0) {
-            sendHelp(sender);
+            sendHelp(sender, label);
             return true;
         }
         String action = args[0].toLowerCase();
@@ -44,7 +46,7 @@ public class AiCommandWhitelistCommand implements CommandExecutor, TabCompleter 
                 return true;
             case "add":
                 if (args.length < 2) {
-                    sender.sendMessage(ChatColor.YELLOW + "用法: /aicmdwl add <command>");
+                    sender.sendMessage(ChatColor.YELLOW + "用法: /" + label + " add <command>");
                     return true;
                 }
                 String toAdd = args[1];
@@ -56,7 +58,7 @@ public class AiCommandWhitelistCommand implements CommandExecutor, TabCompleter 
                 return true;
             case "remove":
                 if (args.length < 2) {
-                    sender.sendMessage(ChatColor.YELLOW + "用法: /aicmdwl remove <command>");
+                    sender.sendMessage(ChatColor.YELLOW + "用法: /" + label + " remove <command>");
                     return true;
                 }
                 String toRemove = args[1];
@@ -71,7 +73,7 @@ public class AiCommandWhitelistCommand implements CommandExecutor, TabCompleter 
                 sender.sendMessage(ChatColor.GREEN + "已重新加载 command-whitelist.yml");
                 return true;
             default:
-                sendHelp(sender);
+                sendHelp(sender, label);
                 return true;
         }
     }
@@ -84,11 +86,11 @@ public class AiCommandWhitelistCommand implements CommandExecutor, TabCompleter 
         return new ArrayList<>();
     }
 
-    private void sendHelp(CommandSender sender) {
+    private void sendHelp(CommandSender sender, String label) {
         sender.sendMessage(ChatColor.YELLOW + "AI 指令白名单管理:");
-        sender.sendMessage(ChatColor.GRAY + "/aicmdwl list - 查看白名单");
-        sender.sendMessage(ChatColor.GRAY + "/aicmdwl add <command> - 添加指令");
-        sender.sendMessage(ChatColor.GRAY + "/aicmdwl remove <command> - 删除指令");
-        sender.sendMessage(ChatColor.GRAY + "/aicmdwl reload - 重新加载配置");
+        sender.sendMessage(ChatColor.GRAY + "/" + label + " list - 查看白名单");
+        sender.sendMessage(ChatColor.GRAY + "/" + label + " add <command> - 添加指令");
+        sender.sendMessage(ChatColor.GRAY + "/" + label + " remove <command> - 删除指令");
+        sender.sendMessage(ChatColor.GRAY + "/" + label + " reload - 重新加载配置");
     }
 }

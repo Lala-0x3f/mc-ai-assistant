@@ -76,9 +76,12 @@ public class McAiAssistant extends JavaPlugin {
         chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager, economyManager, globalMemoryManager, commandWhitelistManager);
         getServer().getPluginManager().registerEvents(chatListener, this);
 
+        ModelCommand modelCommand = new ModelCommand(this, configManager, modelManager);
+        TestCommand testCommand = new TestCommand(this, configManager, aiApiClient, knowledgeBaseManager);
+        AiCommandWhitelistCommand whitelistCommand = new AiCommandWhitelistCommand(this, commandWhitelistManager);
+
         // 注册 /model 指令与补全
         if (getCommand("model") != null) {
-            ModelCommand modelCommand = new ModelCommand(this, configManager, modelManager);
             getCommand("model").setExecutor(modelCommand);
             getCommand("model").setTabCompleter(modelCommand);
         } else {
@@ -87,7 +90,6 @@ public class McAiAssistant extends JavaPlugin {
 
         // 注册 /aitest 指令与补全（模型/知识库健康检查）
         if (getCommand("aitest") != null) {
-            TestCommand testCommand = new TestCommand(this, configManager, aiApiClient, knowledgeBaseManager);
             getCommand("aitest").setExecutor(testCommand);
             getCommand("aitest").setTabCompleter(testCommand);
         } else {
@@ -96,11 +98,20 @@ public class McAiAssistant extends JavaPlugin {
 
         // 注册 /aicmdwl 指令（AI 指令白名单管理）
         if (getCommand("aicmdwl") != null) {
-            AiCommandWhitelistCommand whitelistCommand = new AiCommandWhitelistCommand(this, commandWhitelistManager);
             getCommand("aicmdwl").setExecutor(whitelistCommand);
             getCommand("aicmdwl").setTabCompleter(whitelistCommand);
         } else {
             getLogger().warning("未在 plugin.yml 中找到 aicmdwl 指令定义，/aicmdwl 无法注册");
+        }
+
+        // 注册 /ai 统一管理指令
+        if (getCommand("ai") != null) {
+            AiCommand aiCommand = new AiCommand(this, configManager, modelManager,
+                    testCommand, modelCommand, whitelistCommand, commandWhitelistManager);
+            getCommand("ai").setExecutor(aiCommand);
+            getCommand("ai").setTabCompleter(aiCommand);
+        } else {
+            getLogger().warning("未在 plugin.yml 中找到 ai 指令定义，/ai 无法注册");
         }
  
         // 初始化 RedisChat 兼容性

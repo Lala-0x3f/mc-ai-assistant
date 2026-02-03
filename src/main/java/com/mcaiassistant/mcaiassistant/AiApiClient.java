@@ -652,7 +652,36 @@ public class AiApiClient {
             JsonObject properties = new JsonObject();
             JsonObject command = new JsonObject();
             command.addProperty("type", "string");
-            command.addProperty("description", "要执行的命令，不需要以 / 开头");
+            // 在 tool schema 的 description 中附带实时白名单，便于模型做决策（避免盲猜被拒绝）。
+            String commandDesc = "要执行的命令，不需要以 / 开头";
+            CommandWhitelistManager manager = plugin.getCommandWhitelistManager();
+            if (manager != null) {
+                List<String> whitelist = manager.getWhitelist();
+                if (whitelist != null && !whitelist.isEmpty()) {
+                    int maxItems = 25;
+                    int maxChars = 280;
+                    StringBuilder sb = new StringBuilder(commandDesc);
+                    sb.append("。当前白名单: ");
+                    int count = 0;
+                    for (String item : whitelist) {
+                        if (item == null) continue;
+                        String trimmed = item.trim();
+                        if (trimmed.isEmpty()) continue;
+                        if (count > 0) sb.append(", ");
+                        sb.append(trimmed);
+                        count++;
+                        if (count >= maxItems || sb.length() >= maxChars) {
+                            break;
+                        }
+                    }
+                    if (whitelist.size() > count) {
+                        sb.append(" ...");
+                    }
+                    sb.append(" (共").append(whitelist.size()).append("项)");
+                    commandDesc = sb.toString();
+                }
+            }
+            command.addProperty("description", commandDesc);
             properties.add("command", command);
             parameters.add("properties", properties);
             JsonArray required = new JsonArray();

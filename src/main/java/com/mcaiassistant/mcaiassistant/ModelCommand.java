@@ -11,9 +11,10 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * /model 指令
- * - /model           显示当前有效模型（覆盖或配置）
- * - /model <model>  切换运行时聊天模型（不写回配置）
+ * 模型管理指令
+ * - /ai model           显示当前有效模型（覆盖或配置）
+ * - /ai model <model>  切换运行时聊天模型（不写回配置）
+ * - /model             兼容旧指令
  * 提供 Tab 补全：从 ModelManager 的 /models 缓存获取候选
  */
 public class ModelCommand implements CommandExecutor, TabCompleter {
