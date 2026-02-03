@@ -1,0 +1,9 @@
+# AI 后台指令白名单配置
+
+# 是否启用 AI 指令执行
+enabled: true
+
+# 允许的命令（仅匹配命令名，不含前导 /）
+whitelist:
+  - "say"
+  - "time"

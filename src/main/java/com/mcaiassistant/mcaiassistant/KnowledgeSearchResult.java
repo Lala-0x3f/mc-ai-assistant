@@ -65,6 +65,36 @@ public class KnowledgeSearchResult {
         return builder.toString();
     }
 
+    /**
+     * 将检索结果转换为工具返回内容（纯文本）
+     */
+    public String toToolContent() {
+        if (isEmpty()) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        builder.append("知识库检索结果:\n");
+        if (aiAnswer != null && !aiAnswer.isEmpty()) {
+            builder.append("- AI 搜索摘要:\n")
+                    .append(aiAnswer.trim())
+                    .append("\n");
+        }
+        if (!snippets.isEmpty()) {
+            builder.append("- 直接命中片段:\n");
+            int index = 1;
+            for (KnowledgeSnippet snippet : snippets) {
+                builder.append("  ")
+                        .append(index++)
+                        .append(". [")
+                        .append(snippet.getRelativePath())
+                        .append("]\n")
+                        .append(snippet.getPreview())
+                        .append("\n");
+            }
+        }
+        return builder.toString().trim();
+    }
+
     @Override
     public String toString() {
         return "KnowledgeSearchResult{" +

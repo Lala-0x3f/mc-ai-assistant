@@ -132,6 +132,31 @@ public class ConfigManager {
     public boolean isDebugMode() {
         return config.getBoolean("features.debug_mode", false);
     }
+
+    // 经济扣费配置
+    public boolean isEconomyEnabled() {
+        return config.getBoolean("economy.enabled", false);
+    }
+
+    public double getEconomyCostPerUse() {
+        return config.getDouble("economy.cost_per_use", 0.0);
+    }
+
+    public String getEconomyInsufficientMessage() {
+        return config.getString("economy.insufficient_funds_message", "&c余额不足，使用 AI 需要支付 {cost}。");
+    }
+
+    public String getEconomyChargeFailedMessage() {
+        return config.getString("economy.charge_failed_message", "&c扣费失败，原因: {reason}，已取消本次 AI 请求。");
+    }
+
+    public String getEconomyBalanceMessage() {
+        return config.getString("economy.balance_message", "&b[AI]&f 剩余：{balance} 余额");
+    }
+
+    public String getEconomyBalanceHoverMessage() {
+        return config.getString("economy.balance_hover_message", "&7余额：{old}->{new}");
+    }
     
     // 权限配置
     public boolean isAllowAllPlayers() {
@@ -279,4 +304,33 @@ public class ConfigManager {
     public String getRateLimitMessage() {
         return config.getString("rate_limit.limit_message", "⚠️ 您的请求过于频繁，请稍后再试。每分钟最多 {limit} 次请求。");
     }
+    // 全局记忆配置（简易规则 + 摘要）
+    public boolean isGlobalMemoryEnabled() {
+        return config.getBoolean("global_memory.enabled", false);
+    }
+
+    public int getGlobalMemoryMinLength() {
+        return config.getInt("global_memory.min_length", 12);
+    }
+
+    public int getGlobalMemoryMinInfoScore() {
+        return config.getInt("global_memory.min_info_score", 2);
+    }
+
+    public int getGlobalMemoryMaxEntries() {
+        return config.getInt("global_memory.max_entries", 50);
+    }
+
+    public int getGlobalMemoryMaxSummaryLength() {
+        return config.getInt("global_memory.max_summary_length", 200);
+    }
+
+    public int getGlobalMemoryInjectCount() {
+        return config.getInt("global_memory.max_inject_entries", 3);
+    }
+
+    public int getGlobalMemoryInjectCharLimit() {
+        return config.getInt("global_memory.max_inject_chars", 320);
+    }
+
 }

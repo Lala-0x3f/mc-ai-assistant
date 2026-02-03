@@ -15,6 +15,7 @@ public class McAiAssistant extends JavaPlugin {
     private ModelManager modelManager;
     private ChatListener chatListener;
     private ChatHistoryManager chatHistoryManager;
+    private GlobalMemoryManager globalMemoryManager;
     private AiApiClient aiApiClient;
     private SearchApiClient searchApiClient;
     private KnowledgeBaseManager knowledgeBaseManager;
@@ -22,6 +23,8 @@ public class McAiAssistant extends JavaPlugin {
     private RedisChatCompatibility redisChatCompatibility;
     private ToastNotification toastNotification;
     private RateLimitManager rateLimitManager;
+    private EconomyManager economyManager;
+    private CommandWhitelistManager commandWhitelistManager;
     
     @Override
     public void onEnable() {
@@ -38,13 +41,16 @@ public class McAiAssistant extends JavaPlugin {
         
         // 初始化聊天记录管理器
         chatHistoryManager = new ChatHistoryManager();
-        
+
+        // 初始化全局记忆管理器（相关性检索 + 摘要写入）
+        globalMemoryManager = new GlobalMemoryManager(this, configManager);
+        globalMemoryManager.initialize();
+
         // 初始化 AI API 客户端
         aiApiClient = new AiApiClient(configManager, modelManager);
- 
+
         // 初始化搜索 API 客户端
         searchApiClient = new SearchApiClient(configManager);
-
         // 初始化本地知识库管理器
         knowledgeBaseManager = new KnowledgeBaseManager(this, configManager);
         knowledgeBaseManager.initialize();
@@ -58,21 +64,58 @@ public class McAiAssistant extends JavaPlugin {
         // 初始化速率限制管理器
         rateLimitManager = new RateLimitManager(this, configManager);
 
+        // 初始化经济扣费管理器
+        economyManager = new EconomyManager(this, configManager);
+        economyManager.initialize();
+
+        // 初始化 AI 指令白名单管理器
+        commandWhitelistManager = new CommandWhitelistManager(this);
+        commandWhitelistManager.initialize();
+
         // 注册聊天监听器
-        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager);
+        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager, economyManager, globalMemoryManager, commandWhitelistManager);
         getServer().getPluginManager().registerEvents(chatListener, this);
+
+        ModelCommand modelCommand = new ModelCommand(this, configManager, modelManager);
+        TestCommand testCommand = new TestCommand(this, configManager, aiApiClient, knowledgeBaseManager);
+        AiCommandWhitelistCommand whitelistCommand = new AiCommandWhitelistCommand(this, commandWhitelistManager);
 
         // 注册 /model 指令与补全
         if (getCommand("model") != null) {
-            ModelCommand modelCommand = new ModelCommand(this, configManager, modelManager);
             getCommand("model").setExecutor(modelCommand);
             getCommand("model").setTabCompleter(modelCommand);
         } else {
             getLogger().warning("未在 plugin.yml 中找到 model 指令定义，/model 无法注册");
         }
+
+        // 注册 /aitest 指令与补全（模型/知识库健康检查）
+        if (getCommand("aitest") != null) {
+            getCommand("aitest").setExecutor(testCommand);
+            getCommand("aitest").setTabCompleter(testCommand);
+        } else {
+            getLogger().warning("未在 plugin.yml 中找到 aitest 指令定义，/aitest 无法注册");
+        }
+
+        // 注册 /aicmdwl 指令（AI 指令白名单管理）
+        if (getCommand("aicmdwl") != null) {
+            getCommand("aicmdwl").setExecutor(whitelistCommand);
+            getCommand("aicmdwl").setTabCompleter(whitelistCommand);
+        } else {
+            getLogger().warning("未在 plugin.yml 中找到 aicmdwl 指令定义，/aicmdwl 无法注册");
+        }
+
+        // 注册 /ai 统一管理指令
+        if (getCommand("ai") != null) {
+            AiCommand aiCommand = new AiCommand(this, configManager, modelManager,
+                    testCommand, modelCommand, whitelistCommand, commandWhitelistManager);
+            getCommand("ai").setExecutor(aiCommand);
+            getCommand("ai").setTabCompleter(aiCommand);
+        } else {
+            getLogger().warning("未在 plugin.yml 中找到 ai 指令定义，/ai 无法注册");
+        }
  
         // 初始化 RedisChat 兼容性
-        redisChatCompatibility = new RedisChatCompatibility(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, chatListener, toastNotification);
+        redisChatCompatibility = new RedisChatCompatibility(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, chatListener, toastNotification, globalMemoryManager, rateLimitManager, economyManager);
         
         // 启动定时任务清理过期的速率限制记录
         getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
@@ -150,6 +193,20 @@ public class McAiAssistant extends JavaPlugin {
     public ToastNotification getToastNotification() {
         return toastNotification;
     }
+
+    /**
+     * 获取经济扣费管理器
+     */
+    public EconomyManager getEconomyManager() {
+        return economyManager;
+    }
+
+    /**
+     * 获取 AI 指令白名单管理器
+     */
+    public CommandWhitelistManager getCommandWhitelistManager() {
+        return commandWhitelistManager;
+    }
     
     /**
      * 重载配置
@@ -163,7 +220,13 @@ public class McAiAssistant extends JavaPlugin {
         aiApiClient.updateConfig(configManager);
         knowledgeBaseManager.updateConfig(configManager);
         rateLimitManager.updateConfig(configManager);
+        if (globalMemoryManager != null) {
+            globalMemoryManager.updateConfig(configManager);
+        }
         redisChatCompatibility.updateConfig(configManager);
+        if (economyManager != null) {
+            economyManager.reload();
+        }
         // imageApiClient 也需要更新配置
         if (imageApiClient != null) {
             imageApiClient.updateConfig(configManager);
@@ -171,3 +234,5 @@ public class McAiAssistant extends JavaPlugin {
         getLogger().info("配置已重载");
     }
 }
+
+
