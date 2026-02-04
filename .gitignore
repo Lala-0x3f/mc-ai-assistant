@@ -124,3 +124,5 @@ local-tests/
 
 # Serena 本地元数据
 .serena/
+
+manim/

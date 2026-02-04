@@ -1,3 +1,5 @@
+![cover](/medias/cover.webp)
+
 # MC AI Assistant - 服务器 AI 助手
 
 用于 PaperMC 1.21.4 的 AI 聊天助手插件
