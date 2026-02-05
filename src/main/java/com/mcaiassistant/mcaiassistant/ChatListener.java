@@ -44,6 +44,7 @@ public class ChatListener implements Listener {
     private final EconomyManager economyManager;
     private final GlobalMemoryManager globalMemoryManager;
     private final CommandWhitelistManager commandWhitelistManager;
+    private final McpManager mcpManager;
     
     // 智能匹配模式，避免匹配到 @airport 等词
     private static final Pattern SMART_AI_PATTERN = Pattern.compile("(?:^|\\s)@ai(?:\\s|$|[^a-zA-Z])", Pattern.CASE_INSENSITIVE);
@@ -58,7 +59,8 @@ public class ChatListener implements Listener {
                        SearchApiClient searchApiClient, KnowledgeBaseManager knowledgeBaseManager,
                        ImageApiClient imageApiClient, ToastNotification toastNotification,
                        RateLimitManager rateLimitManager, EconomyManager economyManager,
-                       GlobalMemoryManager globalMemoryManager, CommandWhitelistManager commandWhitelistManager) {
+                       GlobalMemoryManager globalMemoryManager, CommandWhitelistManager commandWhitelistManager,
+                       McpManager mcpManager) {
         this.plugin = plugin;
         this.configManager = configManager;
         this.chatHistoryManager = chatHistoryManager;
@@ -71,6 +73,7 @@ public class ChatListener implements Listener {
         this.economyManager = economyManager;
         this.globalMemoryManager = globalMemoryManager;
         this.commandWhitelistManager = commandWhitelistManager;
+        this.mcpManager = mcpManager;
     }
     
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
@@ -516,6 +519,11 @@ public class ChatListener implements Listener {
                         toolResult = runImageTool(player, call);
                         appendToolMessage(messages, call, toolResult);
                         break;
+                    case "mcp_call":
+                        notifyToolCall(player, "MCP 工具");
+                        toolResult = runMcpTool(call);
+                        appendToolMessage(messages, call, toolResult);
+                        break;
                     default:
                         appendToolMessage(messages, call, "未知工具: " + call.getName());
                         break;
@@ -681,6 +689,16 @@ public class ChatListener implements Listener {
             return "图像生成失败: " + err;
         }
         return "图像生成成功: " + safeAlt + "\nimages: " + imageResponse.getImages();
+    }
+
+    private String runMcpTool(AiApiClient.ToolCall call) {
+        if (mcpManager == null || !mcpManager.hasEnabledServers()) {
+            return "MCP 未启用或未配置服务器。";
+        }
+        String server = getToolArg(call, "server");
+        String toolName = getToolArg(call, "tool");
+        JsonObject args = getToolArgObject(call, "arguments");
+        return mcpManager.callTool(server, toolName, args);
     }
 
     private String buildDedupKey(Player player, String message) {
@@ -1544,6 +1562,27 @@ public class ChatListener implements Listener {
         }
     }
 
+    /**
+     * 获取工具参数（对象）
+     */
+    private JsonObject getToolArgObject(AiApiClient.ToolCall toolCall, String key) {
+        if (toolCall == null || key == null) {
+            return null;
+        }
+        JsonObject args = toolCall.getArguments();
+        if (args == null || !args.has(key) || args.get(key).isJsonNull()) {
+            return null;
+        }
+        try {
+            if (args.get(key).isJsonObject()) {
+                return args.getAsJsonObject(key);
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
+        return null;
+    }
+
     private static class ResponseWrapper {
         private AiApiClient.AiResponse response;
         private boolean failed;
@@ -1561,4 +1600,3 @@ public class ChatListener implements Listener {
         processedMessages.entrySet().removeIf(entry -> entry.getValue() < expirationTime);
     }
 }
-

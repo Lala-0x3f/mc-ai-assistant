@@ -692,6 +692,14 @@ public class AiApiClient {
             tools.add(tool);
         }
 
+        McpManager mcpManager = plugin.getMcpManager();
+        if (mcpManager != null && mcpManager.hasEnabledServers()) {
+            JsonObject mcpTool = mcpManager.buildToolDefinition();
+            if (mcpTool != null) {
+                tools.add(mcpTool);
+            }
+        }
+
         if (tools.size() > 0) {
             requestBody.add("tools", tools);
         }
@@ -754,6 +762,14 @@ public class AiApiClient {
                     "Alt 是图像的中文描述，用于在游戏中显示，应该简洁美观\n" +
                     "使用工具并回复玩具一段话，建议这些画挂在哪或者怎么使用参考图，也可以单纯夸：\"这听起来太有创意了，我立刻帮你创作一张 XXX 的草稿，你可以把它...\" " +
                     "示例：create_image(prompt=\"beautiful sunset over mountains\", alt=\"美丽的山间日落\")";
+        }
+
+        // 添加 MCP 工具指令
+        McpManager mcpManager = plugin.getMcpManager();
+        if (mcpManager != null && mcpManager.hasEnabledServers()) {
+            basePrompt += "\n\n# MCP Tool \n 如果需要调用外部 MCP 服务器工具，请使用 mcp_call。\n" +
+                    "参数: server(服务器名), tool(工具名), arguments(工具参数对象)。\n" +
+                    "仅在确实需要外部能力时使用。";
         }
 
         // 添加搜索特定指令

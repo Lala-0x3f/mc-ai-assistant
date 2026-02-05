@@ -25,6 +25,7 @@ public class McAiAssistant extends JavaPlugin {
     private RateLimitManager rateLimitManager;
     private EconomyManager economyManager;
     private CommandWhitelistManager commandWhitelistManager;
+    private McpManager mcpManager;
     
     @Override
     public void onEnable() {
@@ -72,8 +73,12 @@ public class McAiAssistant extends JavaPlugin {
         commandWhitelistManager = new CommandWhitelistManager(this);
         commandWhitelistManager.initialize();
 
+        // 初始化 MCP 管理器（mcp.json）
+        mcpManager = new McpManager(this);
+        mcpManager.initialize();
+
         // 注册聊天监听器
-        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager, economyManager, globalMemoryManager, commandWhitelistManager);
+        chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager, economyManager, globalMemoryManager, commandWhitelistManager, mcpManager);
         getServer().getPluginManager().registerEvents(chatListener, this);
 
         ModelCommand modelCommand = new ModelCommand(this, configManager, modelManager);
@@ -107,7 +112,7 @@ public class McAiAssistant extends JavaPlugin {
         // 注册 /ai 统一管理指令
         if (getCommand("ai") != null) {
             AiCommand aiCommand = new AiCommand(this, configManager, modelManager,
-                    testCommand, modelCommand, whitelistCommand, commandWhitelistManager);
+                    testCommand, modelCommand, whitelistCommand, commandWhitelistManager, mcpManager);
             getCommand("ai").setExecutor(aiCommand);
             getCommand("ai").setTabCompleter(aiCommand);
         } else {
@@ -139,6 +144,10 @@ public class McAiAssistant extends JavaPlugin {
 
         if (imageApiClient != null) {
             imageApiClient.shutdown();
+        }
+
+        if (mcpManager != null) {
+            mcpManager.shutdown();
         }
 
         getLogger().info(ChatColor.YELLOW + "MC AI Assistant 插件已禁用！");
@@ -207,6 +216,13 @@ public class McAiAssistant extends JavaPlugin {
     public CommandWhitelistManager getCommandWhitelistManager() {
         return commandWhitelistManager;
     }
+
+    /**
+     * 获取 MCP 管理器
+     */
+    public McpManager getMcpManager() {
+        return mcpManager;
+    }
     
     /**
      * 重载配置
@@ -231,7 +247,9 @@ public class McAiAssistant extends JavaPlugin {
         if (imageApiClient != null) {
             imageApiClient.updateConfig(configManager);
         }
+        if (mcpManager != null) {
+            mcpManager.reload();
+        }
         getLogger().info("配置已重载");
     }
 }
-

@@ -623,12 +623,41 @@ features:
 ## /ai 管理指令（统一入口）
 
 - `/ai info` 查看插件与模型信息
-- `/ai tools` 查看启用的工具（知识库/图像/后台指令）
+- `/ai tools` 查看启用的工具（知识库/图像/后台指令/MCP）
 - `/ai model [modelId]` 查看或切换聊天模型
 - `/ai test <all|model|kb>` 健康检查（模型/知识库）
 - `/ai whitelist <list|add|remove|reload>` 管理白名单
 
 兼容旧指令：`/model`、`/aitest`、`/aicmdwl`
+
+## MCP 服务器配置（mcp.json）
+
+插件会在首次启动时生成 `mcp.json`，位置为插件数据目录（与 `config.yml` 同级）。  
+默认 `mcp.json` 为空配置且 MCP 为禁用状态。  
+该文件用于配置 MCP 服务器，当前支持本地 `stdio` 与远程 `streamable-http`/`sse` 两种方式。
+
+示例：
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "enabled": false,
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\\\minecraft\\\\world"]
+    },
+    "remote-weather": {
+      "enabled": false,
+      "transport": "streamable-http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer your-token"
+      }
+    }
+  }
+}
+```
+
+启用后，AI 工具列表中会出现 `mcp_call`，模型可通过该工具调用 MCP 服务器工具。
 
 ## 模型切换与 /ai model 指令
 

@@ -1,47 +1,46 @@
-name: McAiAssistant
-version: '0.2.0'
+﻿name: McAiAssistant
+version: '0.2.1-rc1'
 main: com.mcaiassistant.mcaiassistant.McAiAssistant
-api-version: '1.21'
+api-version: '0.2.1-rc1'
 description: AI Assistant plugin for PaperMC 1.21.x (1.21-1.21.11)
 author: ifctmzzz
 website: https://github.com/Lala-0x3f/mc-ai-assistant
 
-# 软依赖 RedisChat 插件
+# 杞緷璧?RedisChat 鎻掍欢
 softdepend: [RedisChat, Vault, CMI]
 
-# 权限节点
+# 鏉冮檺鑺傜偣
 permissions:
   mcaiassistant.use:
-    description: 允许使用 AI 助手
+    description: 鍏佽浣跨敤 AI 鍔╂墜
     default: true
   
   mcaiassistant.admin:
-    description: 允许管理 AI 助手插件
+    description: 鍏佽绠＄悊 AI 鍔╂墜鎻掍欢
     default: op
     children:
       mcaiassistant.use: true
   mcaiassistant.test:
-    description: 允许执行 AI 助手健康检查指令
-    default: op
+    description: 鍏佽鎵ц AI 鍔╂墜鍋ュ悍妫€鏌ユ寚浠?    default: op
 
 commands:
   ai:
-    description: AI 统一管理指令
+    description: AI 缁熶竴绠＄悊鎸囦护
     usage: "/ai <info|tools|model|test|whitelist> [...]"
     permission: mcaiassistant.admin
-    permission-message: "没有权限执行该命令。"
+    permission-message: "娌℃湁鏉冮檺鎵ц璇ュ懡浠ゃ€?
   model:
-    description: 查看或切换当前 AI 模型（兼容旧指令）
-    usage: "/model [modelId]"
+    description: 鏌ョ湅鎴栧垏鎹㈠綋鍓?AI 妯″瀷锛堝吋瀹规棫鎸囦护锛?    usage: "/model [modelId]"
     permission: mcaiassistant.admin
-    permission-message: "没有权限执行该命令。"
+    permission-message: "娌℃湁鏉冮檺鎵ц璇ュ懡浠ゃ€?
   aitest:
-    description: 测试 AI 模型与知识库可用性（兼容旧指令）
+    description: 娴嬭瘯 AI 妯″瀷涓庣煡璇嗗簱鍙敤鎬э紙鍏煎鏃ф寚浠わ級
     usage: "/aitest <model|kb|all>"
     permission: mcaiassistant.admin
-    permission-message: "没有权限执行该命令。"
+    permission-message: "娌℃湁鏉冮檺鎵ц璇ュ懡浠ゃ€?
   aicmdwl:
-    description: 管理 AI 后台指令白名单（兼容旧指令）
+    description: 绠＄悊 AI 鍚庡彴鎸囦护鐧藉悕鍗曪紙鍏煎鏃ф寚浠わ級
     usage: "/aicmdwl <list|add|remove|reload> [command]"
     permission: mcaiassistant.admin
-    permission-message: "没有权限执行该命令。"
+    permission-message: "娌℃湁鏉冮檺鎵ц璇ュ懡浠ゃ€?
+

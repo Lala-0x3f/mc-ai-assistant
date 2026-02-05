@@ -27,10 +27,12 @@ public class AiCommand implements CommandExecutor, TabCompleter {
     private final ModelCommand modelCommand;
     private final AiCommandWhitelistCommand whitelistCommand;
     private final CommandWhitelistManager commandWhitelistManager;
+    private final McpManager mcpManager;
 
     public AiCommand(McAiAssistant plugin, ConfigManager configManager, ModelManager modelManager,
                      TestCommand testCommand, ModelCommand modelCommand,
-                     AiCommandWhitelistCommand whitelistCommand, CommandWhitelistManager commandWhitelistManager) {
+                     AiCommandWhitelistCommand whitelistCommand, CommandWhitelistManager commandWhitelistManager,
+                     McpManager mcpManager) {
         this.plugin = plugin;
         this.configManager = configManager;
         this.modelManager = modelManager;
@@ -38,6 +40,7 @@ public class AiCommand implements CommandExecutor, TabCompleter {
         this.modelCommand = modelCommand;
         this.whitelistCommand = whitelistCommand;
         this.commandWhitelistManager = commandWhitelistManager;
+        this.mcpManager = mcpManager;
     }
 
     @Override
@@ -162,6 +165,14 @@ public class AiCommand implements CommandExecutor, TabCompleter {
                 : "未启用";
         sender.sendMessage(ChatColor.GRAY + "execute_command: " + formatStatus(commandEnabled)
                 + ChatColor.DARK_GRAY + " (" + whitelistDetail + ")");
+
+        boolean mcpEnabled = mcpManager != null && mcpManager.hasEnabledServers();
+        String mcpDetail = mcpEnabled
+                ? ("服务器数: " + mcpManager.getEnabledServerCount()
+                + " 工具缓存: " + mcpManager.getCachedToolCount())
+                : "未启用";
+        sender.sendMessage(ChatColor.GRAY + "mcp_call: " + formatStatus(mcpEnabled)
+                + ChatColor.DARK_GRAY + " (" + mcpDetail + ")");
     }
 
     private boolean isCommandToolEnabled() {
