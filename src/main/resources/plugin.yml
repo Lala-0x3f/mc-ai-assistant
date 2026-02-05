@@ -2,7 +2,7 @@ name: McAiAssistant
 version: '0.2.0'
 main: com.mcaiassistant.mcaiassistant.McAiAssistant
 api-version: '1.21'
-description: AI Assistant plugin for PaperMC 1.21.4
+description: AI Assistant plugin for PaperMC 1.21.x (1.21-1.21.11)
 author: ifctmzzz
 website: https://github.com/Lala-0x3f/mc-ai-assistant
 

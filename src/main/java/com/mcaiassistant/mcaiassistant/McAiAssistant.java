@@ -6,7 +6,7 @@ import org.bukkit.ChatColor;
 
 /**
  * MC AI Assistant Plugin
- * 为 PaperMC 1.21.4 提供 AI 聊天助手功能
+ * 为 PaperMC 1.21.x (1.21-1.21.11) 提供 AI 聊天助手功能
  */
 public class McAiAssistant extends JavaPlugin {
     
@@ -234,5 +234,4 @@ public class McAiAssistant extends JavaPlugin {
         getLogger().info("配置已重载");
     }
 }
-
 

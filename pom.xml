@@ -10,7 +10,7 @@
     <packaging>jar</packaging>
 
     <name>MC AI Assistant</name>
-    <description>AI Assistant plugin for PaperMC 1.21.4</description>
+    <description>AI Assistant plugin for PaperMC 1.21.x (1.21-1.21.11)</description>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
@@ -41,7 +41,7 @@
         <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
-            <version>1.21.4-R0.1-SNAPSHOT</version>
+            <version>1.21.11-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
         
