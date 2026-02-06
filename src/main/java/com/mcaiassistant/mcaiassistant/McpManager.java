@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * MCP 服务器管理器（配置加载 + 工具发现 + 工具调用）
@@ -105,6 +106,32 @@ public class McpManager {
             }
         }
         return count;
+    }
+
+    public List<McpServerSnapshot> getServerSnapshots() {
+        List<McpServerSnapshot> snapshots = new ArrayList<>();
+        for (Map.Entry<String, McpServerState> entry : serverStates.entrySet()) {
+            String serverName = entry.getKey();
+            McpServerState state = entry.getValue();
+            if (state == null || state.config == null) {
+                continue;
+            }
+            List<McpToolSnapshot> tools = state.tools == null
+                    ? Collections.emptyList()
+                    : state.tools.stream()
+                    .map(t -> new McpToolSnapshot(t.name, t.description, t.inputSchema))
+                    .collect(Collectors.toList());
+            long remaining = getCircuitRemainingMillis(state);
+            snapshots.add(new McpServerSnapshot(
+                    serverName,
+                    state.config.enabled,
+                    isServerCallable(state),
+                    remaining,
+                    state.lastError,
+                    tools
+            ));
+        }
+        return snapshots;
     }
 
     public String callTool(String serverName, String toolName, JsonObject arguments) {
@@ -237,7 +264,7 @@ public class McpManager {
             try (McpSyncClient client = createClient(state.config)) {
                 client.initialize();
                 McpSchema.ListToolsResult result = client.listTools();
-                state.tools = extractToolNames(result);
+                state.tools = extractTools(result);
                 markServerSuccess(state);
             } catch (Exception e) {
                 state.tools = Collections.emptyList();
@@ -293,7 +320,7 @@ public class McpManager {
                 .build();
     }
 
-    private List<String> extractToolNames(McpSchema.ListToolsResult result) {
+    private List<McpToolMeta> extractTools(McpSchema.ListToolsResult result) {
         if (result == null) {
             return Collections.emptyList();
         }
@@ -301,14 +328,16 @@ public class McpManager {
         if (!(toolsObj instanceof List<?> tools)) {
             return Collections.emptyList();
         }
-        List<String> names = new ArrayList<>();
+        List<McpToolMeta> items = new ArrayList<>();
         for (Object tool : tools) {
             Object name = readProperty(tool, "name");
             if (name instanceof String str && !str.isBlank()) {
-                names.add(str);
+                String description = readAsString(readProperty(tool, "description"));
+                String inputSchema = formatSchemaForDisplay(readProperty(tool, "inputSchema"));
+                items.add(new McpToolMeta(str, description, inputSchema));
             }
         }
-        return names;
+        return items;
     }
 
     private String buildToolDescription(List<String> availableServers) {
@@ -334,11 +363,11 @@ public class McpManager {
             }
             builder.append("\n").append(entry.getKey()).append(" 工具: ");
             int count = 0;
-            for (String toolName : state.tools) {
+            for (McpToolMeta tool : state.tools) {
                 if (count > 0) {
                     builder.append(", ");
                 }
-                builder.append(toolName);
+                builder.append(tool.name);
                 count++;
                 if (count >= TOOL_NAME_LIMIT) {
                     builder.append(" ...");
@@ -412,6 +441,44 @@ public class McpManager {
         return names;
     }
 
+    private String readAsString(Object value) {
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof String str) {
+            return str;
+        }
+        return String.valueOf(value);
+    }
+
+    private String formatSchemaForDisplay(Object schemaObj) {
+        if (schemaObj == null) {
+            return "";
+        }
+        String schemaText;
+        if (schemaObj instanceof String str) {
+            schemaText = str;
+        } else {
+            try {
+                schemaText = gson.toJson(schemaObj);
+            } catch (Exception e) {
+                schemaText = String.valueOf(schemaObj);
+            }
+        }
+        return trimForDisplay(schemaText, 900);
+    }
+
+    private String trimForDisplay(String text, int limit) {
+        if (text == null) {
+            return "";
+        }
+        String normalized = text.trim();
+        if (normalized.length() <= limit) {
+            return normalized;
+        }
+        return normalized.substring(0, limit) + "...";
+    }
+
     private String formatCallToolResult(McpSchema.CallToolResult result) {
         if (result == null) {
             return "MCP 工具返回空结果。";
@@ -447,7 +514,7 @@ public class McpManager {
 
     private static class McpServerState {
         private final McpServerConfig config;
-        private List<String> tools;
+        private List<McpToolMeta> tools;
         private String lastError;
         private int consecutiveFailures;
         private long circuitOpenUntilMillis;
@@ -457,6 +524,85 @@ public class McpManager {
             this.tools = Collections.emptyList();
             this.consecutiveFailures = 0;
             this.circuitOpenUntilMillis = 0L;
+        }
+    }
+
+    private static class McpToolMeta {
+        private final String name;
+        private final String description;
+        private final String inputSchema;
+
+        private McpToolMeta(String name, String description, String inputSchema) {
+            this.name = name;
+            this.description = description == null ? "" : description;
+            this.inputSchema = inputSchema == null ? "" : inputSchema;
+        }
+    }
+
+    public static class McpToolSnapshot {
+        private final String name;
+        private final String description;
+        private final String inputSchema;
+
+        public McpToolSnapshot(String name, String description, String inputSchema) {
+            this.name = name == null ? "" : name;
+            this.description = description == null ? "" : description;
+            this.inputSchema = inputSchema == null ? "" : inputSchema;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+
+        public String getInputSchema() {
+            return inputSchema;
+        }
+    }
+
+    public static class McpServerSnapshot {
+        private final String serverName;
+        private final boolean enabled;
+        private final boolean available;
+        private final long circuitRemainingMillis;
+        private final String lastError;
+        private final List<McpToolSnapshot> tools;
+
+        public McpServerSnapshot(String serverName, boolean enabled, boolean available, long circuitRemainingMillis,
+                                 String lastError, List<McpToolSnapshot> tools) {
+            this.serverName = serverName == null ? "" : serverName;
+            this.enabled = enabled;
+            this.available = available;
+            this.circuitRemainingMillis = Math.max(0L, circuitRemainingMillis);
+            this.lastError = lastError == null ? "" : lastError;
+            this.tools = tools == null ? Collections.emptyList() : tools;
+        }
+
+        public String getServerName() {
+            return serverName;
+        }
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public boolean isAvailable() {
+            return available;
+        }
+
+        public long getCircuitRemainingMillis() {
+            return circuitRemainingMillis;
+        }
+
+        public String getLastError() {
+            return lastError;
+        }
+
+        public List<McpToolSnapshot> getTools() {
+            return tools;
         }
     }
 
