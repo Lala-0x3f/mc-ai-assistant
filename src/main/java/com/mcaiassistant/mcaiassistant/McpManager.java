@@ -34,6 +34,8 @@ public class McpManager {
     private static final String CONFIG_FILE_NAME = "mcp.json";
     private static final String TOOL_NAME = "mcp_call";
     private static final int TOOL_NAME_LIMIT = 20;
+    private static final int CIRCUIT_BREAKER_FAILURE_THRESHOLD = 1;
+    private static final long CIRCUIT_BREAKER_OPEN_MILLIS = 60_000L;
 
     private final McAiAssistant plugin;
     private final Gson gson = new Gson();
@@ -62,13 +64,33 @@ public class McpManager {
     }
 
     public boolean hasEnabledServers() {
-        return getEnabledServerCount() > 0;
+        return getAvailableServerCount() > 0;
     }
 
     public int getEnabledServerCount() {
         int count = 0;
         for (McpServerState state : serverStates.values()) {
             if (state != null && state.config != null && state.config.enabled) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public int getAvailableServerCount() {
+        int count = 0;
+        for (McpServerState state : serverStates.values()) {
+            if (isServerCallable(state)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public int getCircuitOpenServerCount() {
+        int count = 0;
+        for (McpServerState state : serverStates.values()) {
+            if (isCircuitOpen(state)) {
                 count++;
             }
         }
@@ -92,27 +114,37 @@ public class McpManager {
         if (toolName == null || toolName.trim().isEmpty()) {
             return "缺少 tool 参数。";
         }
-        McpServerState state = serverStates.get(serverName.trim());
+        String normalizedServer = serverName.trim();
+        String normalizedTool = toolName.trim();
+        McpServerState state = serverStates.get(normalizedServer);
         if (state == null || state.config == null || !state.config.enabled) {
             return "MCP 服务器未启用或不存在: " + serverName;
+        }
+        long remainingMillis = getCircuitRemainingMillis(state);
+        if (remainingMillis > 0) {
+            return buildCircuitOpenMessage(normalizedServer, remainingMillis);
         }
 
         try (McpSyncClient client = createClient(state.config)) {
             client.initialize();
             Map<String, Object> args = convertArguments(arguments);
-            McpSchema.CallToolRequest request = new McpSchema.CallToolRequest(toolName.trim(), args, null);
+            McpSchema.CallToolRequest request = new McpSchema.CallToolRequest(normalizedTool, args, null);
             McpSchema.CallToolResult result = client.callTool(request);
+            markServerSuccess(state);
             return formatCallToolResult(result);
         } catch (Exception e) {
+            long breakerOpenUntil = markServerFailure(state, e.getMessage());
             if (plugin.getConfigManager().isDebugMode()) {
                 plugin.getLogger().warning("[MCP] 工具调用失败: " + e.getMessage());
             }
-            return "MCP 工具调用失败: " + e.getMessage();
+            return "MCP 工具调用失败: " + e.getMessage() + "（已熔断，恢复时间约 "
+                    + Math.max(1L, (breakerOpenUntil - System.currentTimeMillis() + 999L) / 1000L) + " 秒）";
         }
     }
 
     public JsonObject buildToolDefinition() {
-        if (!hasEnabledServers()) {
+        List<String> availableServers = getAvailableServerNames();
+        if (availableServers.isEmpty()) {
             return null;
         }
 
@@ -120,7 +152,7 @@ public class McpManager {
         tool.addProperty("type", "function");
         JsonObject function = new JsonObject();
         function.addProperty("name", TOOL_NAME);
-        function.addProperty("description", buildToolDescription());
+        function.addProperty("description", buildToolDescription(availableServers));
 
         JsonObject parameters = new JsonObject();
         parameters.addProperty("type", "object");
@@ -128,7 +160,12 @@ public class McpManager {
 
         JsonObject server = new JsonObject();
         server.addProperty("type", "string");
-        server.addProperty("description", "MCP 服务器名称（mcp.json 中的键）");
+        server.addProperty("description", "MCP 服务器名称（仅可用服务器）");
+        com.google.gson.JsonArray serverEnum = new com.google.gson.JsonArray();
+        for (String serverName : availableServers) {
+            serverEnum.add(serverName);
+        }
+        server.add("enum", serverEnum);
 
         JsonObject toolName = new JsonObject();
         toolName.addProperty("type", "string");
@@ -201,10 +238,10 @@ public class McpManager {
                 client.initialize();
                 McpSchema.ListToolsResult result = client.listTools();
                 state.tools = extractToolNames(result);
-                state.lastError = null;
+                markServerSuccess(state);
             } catch (Exception e) {
                 state.tools = Collections.emptyList();
-                state.lastError = e.getMessage();
+                markServerFailure(state, e.getMessage());
                 if (plugin.getConfigManager().isDebugMode()) {
                     plugin.getLogger().warning("[MCP] 列表获取失败: " + entry.getKey() + " - " + e.getMessage());
                 }
@@ -274,28 +311,22 @@ public class McpManager {
         return names;
     }
 
-    private String buildToolDescription() {
+    private String buildToolDescription(List<String> availableServers) {
         StringBuilder builder = new StringBuilder("调用已配置的 MCP 服务器工具。");
-        if (!hasEnabledServers()) {
+        if (availableServers == null || availableServers.isEmpty()) {
             return builder.toString();
         }
         builder.append("可用服务器: ");
-        int serverIndex = 0;
-        for (Map.Entry<String, McpServerState> entry : serverStates.entrySet()) {
-            McpServerState state = entry.getValue();
-            if (state == null || state.config == null || !state.config.enabled) {
-                continue;
-            }
-            if (serverIndex > 0) {
+        for (int i = 0; i < availableServers.size(); i++) {
+            if (i > 0) {
                 builder.append(", ");
             }
-            builder.append(entry.getKey());
-            serverIndex++;
+            builder.append(availableServers.get(i));
         }
 
         for (Map.Entry<String, McpServerState> entry : serverStates.entrySet()) {
             McpServerState state = entry.getValue();
-            if (state == null || state.config == null || !state.config.enabled) {
+            if (!isServerCallable(state)) {
                 continue;
             }
             if (state.tools == null || state.tools.isEmpty()) {
@@ -315,7 +346,70 @@ public class McpManager {
                 }
             }
         }
+        int openCount = getCircuitOpenServerCount();
+        if (openCount > 0) {
+            builder.append("\n当前熔断中服务器数量: ").append(openCount);
+        }
         return builder.toString();
+    }
+
+    private boolean isServerCallable(McpServerState state) {
+        return state != null && state.config != null && state.config.enabled && !isCircuitOpen(state);
+    }
+
+    private boolean isCircuitOpen(McpServerState state) {
+        return getCircuitRemainingMillis(state) > 0;
+    }
+
+    private long getCircuitRemainingMillis(McpServerState state) {
+        if (state == null) {
+            return 0L;
+        }
+        synchronized (state) {
+            long remaining = state.circuitOpenUntilMillis - System.currentTimeMillis();
+            return Math.max(0L, remaining);
+        }
+    }
+
+    private String buildCircuitOpenMessage(String serverName, long remainingMillis) {
+        long seconds = Math.max(1L, (remainingMillis + 999L) / 1000L);
+        return "MCP 熔断中: " + serverName + "，请在 " + seconds + " 秒后重试。";
+    }
+
+    private long markServerFailure(McpServerState state, String errorMessage) {
+        if (state == null) {
+            return System.currentTimeMillis();
+        }
+        synchronized (state) {
+            state.lastError = errorMessage;
+            state.consecutiveFailures++;
+            if (state.consecutiveFailures >= CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
+                state.circuitOpenUntilMillis = System.currentTimeMillis() + CIRCUIT_BREAKER_OPEN_MILLIS;
+                state.consecutiveFailures = 0;
+            }
+            return state.circuitOpenUntilMillis;
+        }
+    }
+
+    private void markServerSuccess(McpServerState state) {
+        if (state == null) {
+            return;
+        }
+        synchronized (state) {
+            state.consecutiveFailures = 0;
+            state.circuitOpenUntilMillis = 0L;
+            state.lastError = null;
+        }
+    }
+
+    private List<String> getAvailableServerNames() {
+        List<String> names = new ArrayList<>();
+        for (Map.Entry<String, McpServerState> entry : serverStates.entrySet()) {
+            if (isServerCallable(entry.getValue())) {
+                names.add(entry.getKey());
+            }
+        }
+        return names;
     }
 
     private String formatCallToolResult(McpSchema.CallToolResult result) {
@@ -355,10 +449,14 @@ public class McpManager {
         private final McpServerConfig config;
         private List<String> tools;
         private String lastError;
+        private int consecutiveFailures;
+        private long circuitOpenUntilMillis;
 
         private McpServerState(McpServerConfig config) {
             this.config = config;
             this.tools = Collections.emptyList();
+            this.consecutiveFailures = 0;
+            this.circuitOpenUntilMillis = 0L;
         }
     }
 

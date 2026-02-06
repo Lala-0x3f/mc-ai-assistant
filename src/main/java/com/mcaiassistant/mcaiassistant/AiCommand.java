@@ -166,11 +166,17 @@ public class AiCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.GRAY + "execute_command: " + formatStatus(commandEnabled)
                 + ChatColor.DARK_GRAY + " (" + whitelistDetail + ")");
 
+        boolean mcpConfigured = mcpManager != null && mcpManager.getEnabledServerCount() > 0;
         boolean mcpEnabled = mcpManager != null && mcpManager.hasEnabledServers();
-        String mcpDetail = mcpEnabled
-                ? ("服务器数: " + mcpManager.getEnabledServerCount()
-                + " 工具缓存: " + mcpManager.getCachedToolCount())
-                : "未启用";
+        String mcpDetail;
+        if (!mcpConfigured) {
+            mcpDetail = "未启用";
+        } else {
+            mcpDetail = "可用服务器: " + mcpManager.getAvailableServerCount()
+                    + " 配置启用: " + mcpManager.getEnabledServerCount()
+                    + " 熔断中: " + mcpManager.getCircuitOpenServerCount()
+                    + " 工具缓存: " + mcpManager.getCachedToolCount();
+        }
         sender.sendMessage(ChatColor.GRAY + "mcp_call: " + formatStatus(mcpEnabled)
                 + ChatColor.DARK_GRAY + " (" + mcpDetail + ")");
     }

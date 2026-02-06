@@ -18,6 +18,7 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import com.google.gson.JsonObject;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -481,6 +482,7 @@ public class ChatListener implements Listener {
 
         int knowledgeCalls = 0;
         int maxSteps = 6;
+        Set<String> failedMcpTargets = new HashSet<>();
 
         for (int step = 0; step < maxSteps; step++) {
             appendAssistantMessage(messages, current);
@@ -521,7 +523,17 @@ public class ChatListener implements Listener {
                         break;
                     case "mcp_call":
                         notifyToolCall(player, "MCP 工具");
-                        toolResult = runMcpTool(call);
+                        String mcpServer = getToolArg(call, "server");
+                        String mcpTool = getToolArg(call, "tool");
+                        String mcpKey = (mcpServer == null ? "" : mcpServer.trim()) + "|" + (mcpTool == null ? "" : mcpTool.trim());
+                        if (failedMcpTargets.contains(mcpKey)) {
+                            toolResult = "已跳过重复失败的 MCP 调用: " + mcpKey;
+                        } else {
+                            toolResult = runMcpTool(call);
+                            if (isMcpFailureResult(toolResult)) {
+                                failedMcpTargets.add(mcpKey);
+                            }
+                        }
                         appendToolMessage(messages, call, toolResult);
                         break;
                     default:
@@ -539,6 +551,16 @@ public class ChatListener implements Listener {
         }
 
         if (current != null && current.hasToolCalls()) {
+            try {
+                AiApiClient.AiResponse fallback = aiApiClient.sendChatCompletionWithMessages(messages, false);
+                if (fallback != null && fallback.getContent() != null && !fallback.getContent().trim().isEmpty()) {
+                    return fallback.getContent();
+                }
+            } catch (Exception e) {
+                if (configManager.isDebugMode()) {
+                    plugin.getLogger().warning("[Agent] 工具过多后的无工具兜底失败: " + e.getMessage());
+                }
+            }
             return "抱歉，我在处理过程中触发了过多工具调用，为避免影响服务器性能，本次已中止。请换一种问法或减少需求复杂度。";
         }
         return current == null ? null : current.getContent();
@@ -693,12 +715,25 @@ public class ChatListener implements Listener {
 
     private String runMcpTool(AiApiClient.ToolCall call) {
         if (mcpManager == null || !mcpManager.hasEnabledServers()) {
-            return "MCP 未启用或未配置服务器。";
+            return "MCP 未启用或当前不可用（可能全部熔断）。";
         }
         String server = getToolArg(call, "server");
         String toolName = getToolArg(call, "tool");
         JsonObject args = getToolArgObject(call, "arguments");
         return mcpManager.callTool(server, toolName, args);
+    }
+
+    private boolean isMcpFailureResult(String result) {
+        if (result == null || result.trim().isEmpty()) {
+            return true;
+        }
+        return result.startsWith("MCP 工具调用失败:")
+                || result.startsWith("MCP 熔断中:")
+                || result.startsWith("MCP 未启用或当前不可用")
+                || result.startsWith("MCP 服务器未启用或不存在:")
+                || result.startsWith("缺少 server 参数。")
+                || result.startsWith("缺少 tool 参数。")
+                || result.startsWith("MCP 工具返回空结果。");
     }
 
     private String buildDedupKey(Player player, String message) {
