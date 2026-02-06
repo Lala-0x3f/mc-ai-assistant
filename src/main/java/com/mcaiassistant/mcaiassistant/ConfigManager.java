@@ -167,13 +167,13 @@ public class ConfigManager {
         return config.getString("permissions.required_permission", "mcaiassistant.use");
     }
 
-    // ֪ʶ������
+    // 知识库配置
     public boolean isKnowledgeEnabled() {
         return config.getBoolean("knowledge.enabled", false);
     }
 
     public String getKnowledgeContent() {
-        return config.getString("knowledge.content", "Minecraft �������");
+        return config.getString("knowledge.content", "Minecraft 服务器");
     }
 
     public String getKnowledgeFolderName() {
