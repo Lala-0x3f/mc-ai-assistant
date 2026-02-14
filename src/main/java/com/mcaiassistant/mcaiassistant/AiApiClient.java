@@ -2,6 +2,7 @@ package com.mcaiassistant.mcaiassistant;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import okhttp3.*;
 import org.bukkit.Bukkit;
@@ -16,6 +17,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -927,23 +930,7 @@ public class AiApiClient {
                                     continue;
                                 }
                                 String name = function.get("name").getAsString();
-                                JsonObject arguments = new JsonObject();
-                                if (function.has("arguments") && !function.get("arguments").isJsonNull()) {
-                                    try {
-                                        if (function.get("arguments").isJsonObject()) {
-                                            arguments = function.getAsJsonObject("arguments");
-                                        } else {
-                                            String argText = function.get("arguments").getAsString();
-                                            if (argText != null && !argText.trim().isEmpty()) {
-                                                arguments = gson.fromJson(argText, JsonObject.class);
-                                            }
-                                        }
-                                    } catch (Exception e) {
-                                        if (configManager.isDebugMode()) {
-                                            plugin.getLogger().warning("解析工具参数失败: " + e.getMessage());
-                                        }
-                                    }
-                                }
+                                JsonObject arguments = parseToolArguments(function, name);
                                 toolCalls.add(new ToolCall(id, name, arguments));
                             }
                         }
@@ -957,6 +944,111 @@ public class AiApiClient {
         } catch (Exception e) {
             throw new IOException("解析响应失败: " + e.getMessage());
         }
+    }
+
+    private JsonObject parseToolArguments(JsonObject function, String toolName) {
+        JsonObject arguments = new JsonObject();
+        if (function == null || !function.has("arguments") || function.get("arguments").isJsonNull()) {
+            return arguments;
+        }
+
+        JsonElement argElement = function.get("arguments");
+        if (argElement.isJsonObject()) {
+            return function.getAsJsonObject("arguments");
+        }
+
+        String argText;
+        try {
+            argText = argElement.getAsString();
+        } catch (Exception e) {
+            return arguments;
+        }
+        if (argText == null || argText.trim().isEmpty()) {
+            return arguments;
+        }
+
+        try {
+            JsonObject parsed = gson.fromJson(argText, JsonObject.class);
+            return parsed == null ? arguments : parsed;
+        } catch (Exception e) {
+            JsonObject recovered = recoverToolArguments(toolName, argText);
+            if (configManager.isDebugMode()) {
+                String detail = recovered.has("command") ? "，已使用 execute_command 宽松恢复" : "";
+                plugin.getLogger().warning("解析工具参数失败(" + toolName + "): " + e.getMessage() + detail);
+            }
+            return recovered;
+        }
+    }
+
+    private JsonObject recoverToolArguments(String toolName, String argText) {
+        JsonObject recovered = new JsonObject();
+        if (!"execute_command".equals(toolName) || argText == null || argText.trim().isEmpty()) {
+            return recovered;
+        }
+
+        String command = extractCommandFromMalformedArguments(argText);
+        if (command == null || command.trim().isEmpty()) {
+            return recovered;
+        }
+        recovered.addProperty("command", command.trim());
+        return recovered;
+    }
+
+    private String extractCommandFromMalformedArguments(String argText) {
+        String trimmed = argText == null ? "" : argText.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+
+        // 支持 arguments 直接是命令字符串的异常返回格式
+        if (!trimmed.startsWith("{")) {
+            return decodeLooseStringValue(trimmed);
+        }
+
+        // 兼容命令内含 tellraw/json 文本组件且未正确转义的场景，按最后一个引号回收 command。
+        Pattern pattern = Pattern.compile("\"command\"\\s*:\\s*\"(.*)\"\\s*}\\s*$", Pattern.DOTALL);
+        Matcher matcher = pattern.matcher(trimmed);
+        if (matcher.find()) {
+            return decodeLooseStringValue(matcher.group(1));
+        }
+
+        int keyPos = trimmed.indexOf("\"command\"");
+        if (keyPos < 0) {
+            return null;
+        }
+        int colonPos = trimmed.indexOf(':', keyPos);
+        if (colonPos < 0) {
+            return null;
+        }
+        String tail = trimmed.substring(colonPos + 1).trim();
+        if (tail.startsWith("\"")) {
+            tail = tail.substring(1);
+            int end = tail.lastIndexOf('"');
+            if (end >= 0) {
+                tail = tail.substring(0, end);
+            }
+            return decodeLooseStringValue(tail);
+        }
+        int endBrace = tail.lastIndexOf('}');
+        if (endBrace >= 0) {
+            tail = tail.substring(0, endBrace);
+        }
+        return decodeLooseStringValue(tail);
+    }
+
+    private String decodeLooseStringValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        String out = value.trim();
+        if (out.startsWith("\"") && out.endsWith("\"") && out.length() >= 2) {
+            out = out.substring(1, out.length() - 1);
+        }
+        out = out.replace("\\\"", "\"")
+                .replace("\\n", " ")
+                .replace("\\r", " ")
+                .replace("\\t", " ");
+        return out;
     }
 
     /**

@@ -501,44 +501,52 @@ public class ChatListener implements Listener {
                 lastToolName = call.getName();
                 String toolResult;
 
-                switch (call.getName()) {
-                    case "query_knowledge":
-                        knowledgeCalls++;
-                        if (knowledgeCalls > 2) {
-                            toolResult = "已达到 query_knowledge 最大调用次数(2)，本次查询被跳过。";
-                        } else {
-                            notifyToolCall(player, "知识库查询");
-                            toolResult = runKnowledgeTool(call);
-                        }
-                        appendToolMessage(messages, call, toolResult);
-                        break;
-                    case "execute_command":
-                        notifyToolCall(player, "后台指令");
-                        toolResult = runCommandTool(call);
-                        appendToolMessage(messages, call, toolResult);
-                        break;
-                    case "create_image":
-                        toolResult = runImageTool(player, call);
-                        appendToolMessage(messages, call, toolResult);
-                        break;
-                    case "mcp_call":
-                        notifyToolCall(player, "MCP 工具");
-                        String mcpServer = getToolArg(call, "server");
-                        String mcpTool = getToolArg(call, "tool");
-                        String mcpKey = (mcpServer == null ? "" : mcpServer.trim()) + "|" + (mcpTool == null ? "" : mcpTool.trim());
-                        if (failedMcpTargets.contains(mcpKey)) {
-                            toolResult = "已跳过重复失败的 MCP 调用: " + mcpKey;
-                        } else {
-                            toolResult = runMcpTool(call);
-                            if (isMcpFailureResult(toolResult)) {
-                                failedMcpTargets.add(mcpKey);
+                try {
+                    switch (call.getName()) {
+                        case "query_knowledge":
+                            knowledgeCalls++;
+                            if (knowledgeCalls > 2) {
+                                toolResult = "已达到 query_knowledge 最大调用次数(2)，本次查询被跳过。";
+                            } else {
+                                notifyToolCall(player, "知识库查询");
+                                toolResult = runKnowledgeTool(call);
                             }
-                        }
-                        appendToolMessage(messages, call, toolResult);
-                        break;
-                    default:
-                        appendToolMessage(messages, call, "未知工具: " + call.getName());
-                        break;
+                            appendToolMessage(messages, call, toolResult);
+                            break;
+                        case "execute_command":
+                            notifyToolCall(player, "后台指令");
+                            toolResult = runCommandTool(call);
+                            appendToolMessage(messages, call, toolResult);
+                            break;
+                        case "create_image":
+                            toolResult = runImageTool(player, call);
+                            appendToolMessage(messages, call, toolResult);
+                            break;
+                        case "mcp_call":
+                            notifyToolCall(player, "MCP 工具");
+                            String mcpServer = getToolArg(call, "server");
+                            String mcpTool = getToolArg(call, "tool");
+                            String mcpKey = (mcpServer == null ? "" : mcpServer.trim()) + "|" + (mcpTool == null ? "" : mcpTool.trim());
+                            if (failedMcpTargets.contains(mcpKey)) {
+                                toolResult = "已跳过重复失败的 MCP 调用: " + mcpKey;
+                            } else {
+                                toolResult = runMcpTool(call);
+                                if (isMcpFailureResult(toolResult)) {
+                                    failedMcpTargets.add(mcpKey);
+                                }
+                            }
+                            appendToolMessage(messages, call, toolResult);
+                            break;
+                        default:
+                            appendToolMessage(messages, call, "未知工具: " + call.getName());
+                            break;
+                    }
+                } catch (Exception e) {
+                    String err = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                    if (configManager.isDebugMode()) {
+                        plugin.getLogger().warning("[Agent] 工具调用异常(" + call.getName() + "): " + err);
+                    }
+                    appendToolMessage(messages, call, "工具调用异常(" + call.getName() + "): " + err);
                 }
             }
 
@@ -625,7 +633,7 @@ public class ChatListener implements Listener {
         return content == null ? "未在本地知识库中找到相关资料。" : content;
     }
 
-    private String runCommandTool(AiApiClient.ToolCall call) throws Exception {
+    private String runCommandTool(AiApiClient.ToolCall call) {
         if (commandWhitelistManager == null || !commandWhitelistManager.isEnabled()) {
             return "指令白名单未启用。";
         }
@@ -634,13 +642,19 @@ public class ChatListener implements Listener {
             return "缺少 command 参数。";
         }
         String normalized = normalizeCommand(command);
+        String displayCommand = summarizeCommandForToolResult(normalized);
         if (!commandWhitelistManager.isCommandAllowed(normalized)) {
-            return "指令被白名单拒绝: " + normalized;
+            return "指令被白名单拒绝: " + displayCommand;
         }
-        return Bukkit.getScheduler().callSyncMethod(plugin, () -> {
-            boolean success = Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), normalized);
-            return "执行指令: " + normalized + "\n结果: " + (success ? "成功" : "失败");
-        }).get();
+        try {
+            return Bukkit.getScheduler().callSyncMethod(plugin, () -> {
+                boolean success = Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), normalized);
+                return "执行指令: " + displayCommand + "\n结果: " + (success ? "成功" : "失败");
+            }).get();
+        } catch (Exception e) {
+            String err = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            return "执行指令异常: " + displayCommand + "\n错误: " + err;
+        }
     }
 
     private String runImageTool(Player player, AiApiClient.ToolCall call) {
@@ -1576,7 +1590,19 @@ public class ChatListener implements Listener {
         if (trimmed.startsWith("/")) {
             trimmed = trimmed.substring(1).trim();
         }
-        return trimmed.replaceAll("\\s+", " ");
+        return trimmed.replace('\r', ' ').replace('\n', ' ').trim();
+    }
+
+    private String summarizeCommandForToolResult(String command) {
+        if (command == null) {
+            return "";
+        }
+        String normalized = command.trim();
+        int maxLen = 240;
+        if (normalized.length() <= maxLen) {
+            return normalized;
+        }
+        return normalized.substring(0, maxLen) + "... (len=" + normalized.length() + ")";
     }
 
     /**
