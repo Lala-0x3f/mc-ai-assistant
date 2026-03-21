@@ -648,8 +648,16 @@ public class ChatListener implements Listener {
         }
         try {
             return Bukkit.getScheduler().callSyncMethod(plugin, () -> {
-                boolean success = Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), normalized);
-                return "执行指令: " + displayCommand + "\n结果: " + (success ? "成功" : "失败");
+                StringBuilder output = new StringBuilder();
+                org.bukkit.command.CommandSender fakeSender = Bukkit.createCommandSender(
+                    component -> output.append(net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(component)).append("\n")
+                );
+                boolean success = Bukkit.getServer().dispatchCommand(fakeSender, normalized);
+                String result = "执行指令: " + displayCommand + "\n结果: " + (success ? "成功" : "失败");
+                if (output.length() > 0) {
+                    result += "\n输出: " + output.toString().trim();
+                }
+                return result;
             }).get();
         } catch (Exception e) {
             String err = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
@@ -1556,8 +1564,16 @@ public class ChatListener implements Listener {
         CompletableFuture.supplyAsync(() -> {
             try {
                 return Bukkit.getScheduler().callSyncMethod(plugin, () -> {
-                    boolean success = Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), normalized);
-                    return "执行指令: " + normalized + "\n结果: " + (success ? "成功" : "失败");
+                    StringBuilder output = new StringBuilder();
+                    org.bukkit.command.CommandSender fakeSender = Bukkit.createCommandSender(
+                        component -> output.append(net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(component)).append("\n")
+                    );
+                    boolean success = Bukkit.getServer().dispatchCommand(fakeSender, normalized);
+                    String result = "执行指令: " + normalized + "\n结果: " + (success ? "成功" : "失败");
+                    if (output.length() > 0) {
+                        result += "\n输出: " + output.toString().trim();
+                    }
+                    return result;
                 }).get();
             } catch (Exception e) {
                 return "执行指令异常: " + normalized + "\n错误: " + e.getMessage();

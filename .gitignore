@@ -126,3 +126,4 @@ local-tests/
 .serena/
 
 manim/
+.ace-tool/
