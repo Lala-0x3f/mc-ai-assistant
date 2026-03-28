@@ -399,8 +399,8 @@ public class ChatListener implements Listener {
 
         // 2. 如果有纯文本内容，立即发送
         if (!cleanResponse.trim().isEmpty()) {
-            String formattedMessage = ChatColor.AQUA + aiPrefix + ChatColor.WHITE + cleanResponse;
-            Bukkit.broadcastMessage(formattedMessage);
+            Component formattedComponent = MarkdownMessageRenderer.buildInteractiveMarkdownMessage(aiPrefix, cleanResponse);
+            Bukkit.broadcast(formattedComponent);
             if (configManager.isDebugMode()) {
                 plugin.getLogger().info("[响应处理] ✅ 已发送纯文本内容: " + cleanResponse);
             }
@@ -457,7 +457,7 @@ public class ChatListener implements Listener {
             String aiPrefix = configManager.getAiPrefix();
             String cleaned = removeMarkTags(removeImageTags(removeKnowledgeTags(finalContent)));
             if (!cleaned.trim().isEmpty()) {
-                Bukkit.broadcastMessage(ChatColor.AQUA + aiPrefix + ChatColor.WHITE + cleaned);
+                Bukkit.broadcast(MarkdownMessageRenderer.buildInteractiveMarkdownMessage(aiPrefix, cleaned));
             }
 
             // 记录聊天历史（以最终文本为准）
@@ -929,43 +929,7 @@ public class ChatListener implements Listener {
         String aiName = "🔍 " + configManager.getAiName();
         String aiPrefix = configManager.getAiPrefix();
 
-        // 构建搜索响应组件
-        Component messageComponent = Component.empty();
-
-        // 添加搜索查询信息
-        if (searchResult.getSearchQuery() != null && !searchResult.getSearchQuery().trim().isEmpty()) {
-            messageComponent = messageComponent
-                .append(Component.text("🔍 搜索: ", NamedTextColor.GRAY))
-                .append(Component.text(searchResult.getSearchQuery(), NamedTextColor.GRAY))
-                .append(Component.newline());
-        }
-
-        // 添加搜索结果前缀
-        messageComponent = messageComponent
-            .append(Component.text(aiPrefix, NamedTextColor.GREEN))
-            .append(Component.text(searchResult.getResultText(), NamedTextColor.WHITE));
-
-        // 如果有链接，添加链接部分
-        if (searchResult.getLinks() != null && !searchResult.getLinks().isEmpty()) {
-            messageComponent = messageComponent
-                .append(Component.newline())
-                .append(Component.text("📎 相关链接: ", NamedTextColor.AQUA));
-
-            for (int i = 0; i < searchResult.getLinks().size(); i++) {
-                SearchApiClient.LinkInfo link = searchResult.getLinks().get(i);
-                if (i > 0) {
-                    messageComponent = messageComponent.append(Component.text(" | ", NamedTextColor.GRAY));
-                }
-
-                // 创建可点击的链接
-                Component linkComponent = Component.text(link.getTitle(), NamedTextColor.BLUE)
-                    .decorate(TextDecoration.UNDERLINED)
-                    .clickEvent(ClickEvent.openUrl(link.getUrl()))
-                    .hoverEvent(HoverEvent.showText(Component.text("点击打开: " + link.getUrl(), NamedTextColor.YELLOW)));
-
-                messageComponent = messageComponent.append(linkComponent);
-            }
-        }
+        Component messageComponent = MarkdownMessageRenderer.buildInteractiveSearchMessage(aiPrefix, searchResult);
 
         // 广播消息给所有在线玩家
         for (Player player : Bukkit.getOnlinePlayers()) {
