@@ -1,10 +1,19 @@
 package com.mcaiassistant.mcaiassistant;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
+import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -27,10 +36,12 @@ public class AiCommand implements CommandExecutor, TabCompleter {
     private final ModelCommand modelCommand;
     private final AiCommandWhitelistCommand whitelistCommand;
     private final CommandWhitelistManager commandWhitelistManager;
+    private final McpManager mcpManager;
 
     public AiCommand(McAiAssistant plugin, ConfigManager configManager, ModelManager modelManager,
                      TestCommand testCommand, ModelCommand modelCommand,
-                     AiCommandWhitelistCommand whitelistCommand, CommandWhitelistManager commandWhitelistManager) {
+                     AiCommandWhitelistCommand whitelistCommand, CommandWhitelistManager commandWhitelistManager,
+                     McpManager mcpManager) {
         this.plugin = plugin;
         this.configManager = configManager;
         this.modelManager = modelManager;
@@ -38,6 +49,7 @@ public class AiCommand implements CommandExecutor, TabCompleter {
         this.modelCommand = modelCommand;
         this.whitelistCommand = whitelistCommand;
         this.commandWhitelistManager = commandWhitelistManager;
+        this.mcpManager = mcpManager;
     }
 
     @Override
@@ -162,6 +174,18 @@ public class AiCommand implements CommandExecutor, TabCompleter {
                 : "未启用";
         sender.sendMessage(ChatColor.GRAY + "execute_command: " + formatStatus(commandEnabled)
                 + ChatColor.DARK_GRAY + " (" + whitelistDetail + ")");
+
+        boolean mcpConfigured = mcpManager != null && mcpManager.getEnabledServerCount() > 0;
+        if (mcpConfigured) {
+            boolean mcpEnabled = mcpManager.hasEnabledServers();
+            String mcpDetail = "可用服务器: " + mcpManager.getAvailableServerCount()
+                    + " 配置启用: " + mcpManager.getEnabledServerCount()
+                    + " 熔断中: " + mcpManager.getCircuitOpenServerCount()
+                    + " 工具缓存: " + mcpManager.getCachedToolCount();
+            sender.sendMessage(ChatColor.GRAY + "mcp_call: " + formatStatus(mcpEnabled)
+                    + ChatColor.DARK_GRAY + " (" + mcpDetail + ")");
+            renderMcpTree(sender);
+        }
     }
 
     private boolean isCommandToolEnabled() {
@@ -174,5 +198,251 @@ public class AiCommand implements CommandExecutor, TabCompleter {
 
     private String onOff(boolean enabled) {
         return enabled ? "开" : "关";
+    }
+
+    private void renderMcpTree(CommandSender sender) {
+        if (mcpManager == null) {
+            sender.sendMessage(ChatColor.DARK_GRAY + "└─ MCP: 未初始化");
+            return;
+        }
+        List<McpManager.McpServerSnapshot> servers = mcpManager.getServerSnapshots();
+        if (servers.isEmpty()) {
+            sender.sendMessage(ChatColor.DARK_GRAY + "└─ MCP: 未配置服务器");
+            return;
+        }
+        if (sender instanceof Player player) {
+            sendMcpTreeToPlayer(player, servers);
+        } else {
+            sendMcpTreePlain(sender, servers);
+        }
+    }
+
+    private void sendMcpTreeToPlayer(Player player, List<McpManager.McpServerSnapshot> servers) {
+        player.sendMessage(Component.text("└─ MCP Servers", NamedTextColor.DARK_GRAY)
+                .append(Component.text(" (悬停查看详情)", NamedTextColor.GRAY)));
+        for (int i = 0; i < servers.size(); i++) {
+            McpManager.McpServerSnapshot server = servers.get(i);
+            boolean lastServer = i == servers.size() - 1;
+            String serverPrefix = lastServer ? "   └─ " : "   ├─ ";
+            Component serverLine = Component.text(serverPrefix, NamedTextColor.DARK_GRAY)
+                    .append(Component.text(server.getServerName() + " ", NamedTextColor.WHITE))
+                    .append(Component.text("[" + getServerStatusText(server) + "] ", getServerStatusColor(server)))
+                    .append(Component.text("tools=" + server.getTools().size(), NamedTextColor.DARK_GRAY))
+                    .hoverEvent(buildServerHover(server));
+            player.sendMessage(serverLine);
+
+            List<McpManager.McpToolSnapshot> tools = server.getTools();
+            for (int j = 0; j < tools.size(); j++) {
+                McpManager.McpToolSnapshot tool = tools.get(j);
+                boolean lastTool = j == tools.size() - 1;
+                String toolPrefix = (lastServer ? "      " : "   │  ") + (lastTool ? "└─ " : "├─ ");
+                Component toolLine = Component.text(toolPrefix, NamedTextColor.DARK_GRAY)
+                        .append(Component.text(tool.getName(), NamedTextColor.AQUA))
+                        .append(Component.text("  ⓘ", NamedTextColor.GRAY))
+                        .hoverEvent(buildToolHover(server, tool));
+                player.sendMessage(toolLine);
+            }
+        }
+    }
+
+    private void sendMcpTreePlain(CommandSender sender, List<McpManager.McpServerSnapshot> servers) {
+        sender.sendMessage(ChatColor.DARK_GRAY + "└─ MCP Servers");
+        for (int i = 0; i < servers.size(); i++) {
+            McpManager.McpServerSnapshot server = servers.get(i);
+            boolean lastServer = i == servers.size() - 1;
+            String serverPrefix = lastServer ? "   └─ " : "   ├─ ";
+            sender.sendMessage(ChatColor.DARK_GRAY + serverPrefix + ChatColor.AQUA + server.getServerName() + " "
+                    + getServerStatusTextBracket(server)
+                    + ChatColor.GRAY + " (tools: " + server.getTools().size() + ")");
+            List<McpManager.McpToolSnapshot> tools = server.getTools();
+            for (int j = 0; j < tools.size(); j++) {
+                McpManager.McpToolSnapshot tool = tools.get(j);
+                boolean lastTool = j == tools.size() - 1;
+                String toolPrefix = (lastServer ? "      " : "   │  ") + (lastTool ? "└─ " : "├─ ");
+                sender.sendMessage(ChatColor.DARK_GRAY + toolPrefix + ChatColor.GREEN + tool.getName());
+            }
+        }
+    }
+
+    private Component buildServerHover(McpManager.McpServerSnapshot server) {
+        TextComponent.Builder b = Component.text();
+        b.append(Component.text("MCP Server", NamedTextColor.GOLD))
+                .append(Component.newline())
+                .append(labelValue("名称", server.getServerName(), NamedTextColor.WHITE))
+                .append(Component.newline())
+                .append(labelValue("状态", getServerStatusText(server), getServerStatusColor(server)))
+                .append(Component.newline())
+                .append(labelValue("工具数", String.valueOf(server.getTools().size()), NamedTextColor.AQUA));
+        if (server.getCircuitRemainingMillis() > 0) {
+            b.append(Component.newline())
+                    .append(labelValue("熔断剩余", ((server.getCircuitRemainingMillis() + 999L) / 1000L) + " 秒", NamedTextColor.GOLD));
+        }
+        if (server.getLastError() != null && !server.getLastError().isBlank()) {
+            b.append(Component.newline())
+                    .append(Component.text("最近错误: ", NamedTextColor.RED))
+                    .append(Component.text(server.getLastError(), NamedTextColor.GRAY));
+        }
+        return b.build();
+    }
+
+    private Component buildToolHover(McpManager.McpServerSnapshot server, McpManager.McpToolSnapshot tool) {
+        TextComponent.Builder b = Component.text();
+        b.append(Component.text("MCP Tool", NamedTextColor.GOLD))
+                .append(Component.newline())
+                .append(labelValue("Server", server.getServerName(), NamedTextColor.WHITE))
+                .append(Component.newline())
+                .append(labelValue("Tool", tool.getName(), NamedTextColor.AQUA))
+                .append(Component.newline())
+                .append(Component.text("描述: ", NamedTextColor.YELLOW))
+                .append(Component.text(
+                        tool.getDescription() == null || tool.getDescription().isBlank() ? "(无)" : tool.getDescription(),
+                        NamedTextColor.GRAY
+                ));
+
+        if (tool.getInputSchema() != null && !tool.getInputSchema().isBlank()) {
+            b.append(Component.newline())
+                    .append(Component.text("inputSchema:", NamedTextColor.YELLOW))
+                    .append(Component.newline())
+                    .append(renderJsonWithHighlight(tool.getInputSchema()));
+        }
+        return b.build();
+    }
+
+    private Component labelValue(String label, String value, NamedTextColor valueColor) {
+        return Component.text(label + ": ", NamedTextColor.YELLOW)
+                .append(Component.text(value == null ? "" : value, valueColor));
+    }
+
+    private Component renderJsonWithHighlight(String rawJson) {
+        if (rawJson == null || rawJson.isBlank()) {
+            return Component.text("(empty)", NamedTextColor.DARK_GRAY);
+        }
+        try {
+            JsonElement root = JsonParser.parseString(rawJson);
+            TextComponent.Builder builder = Component.text();
+            appendJsonElement(builder, root, 0);
+            return builder.build();
+        } catch (Exception e) {
+            return Component.text(rawJson, NamedTextColor.GRAY);
+        }
+    }
+
+    private void appendJsonElement(TextComponent.Builder builder, JsonElement element, int indent) {
+        if (element == null || element.isJsonNull()) {
+            builder.append(Component.text("null", NamedTextColor.RED));
+            return;
+        }
+        if (element.isJsonObject()) {
+            appendJsonObject(builder, element.getAsJsonObject(), indent);
+            return;
+        }
+        if (element.isJsonArray()) {
+            appendJsonArray(builder, element.getAsJsonArray(), indent);
+            return;
+        }
+        appendJsonPrimitive(builder, element.getAsJsonPrimitive());
+    }
+
+    private void appendJsonObject(TextComponent.Builder builder, JsonObject obj, int indent) {
+        builder.append(Component.text("{", NamedTextColor.GRAY));
+        if (obj.isEmpty()) {
+            builder.append(Component.text("}", NamedTextColor.GRAY));
+            return;
+        }
+        int size = obj.entrySet().size();
+        int idx = 0;
+        for (var entry : obj.entrySet()) {
+            idx++;
+            builder.append(Component.newline());
+            appendIndent(builder, indent + 1);
+            builder.append(Component.text("\"" + entry.getKey() + "\"", NamedTextColor.AQUA));
+            builder.append(Component.text(": ", NamedTextColor.GRAY));
+            appendJsonElement(builder, entry.getValue(), indent + 1);
+            if (idx < size) {
+                builder.append(Component.text(",", NamedTextColor.GRAY));
+            }
+        }
+        builder.append(Component.newline());
+        appendIndent(builder, indent);
+        builder.append(Component.text("}", NamedTextColor.GRAY));
+    }
+
+    private void appendJsonArray(TextComponent.Builder builder, JsonArray arr, int indent) {
+        builder.append(Component.text("[", NamedTextColor.GRAY));
+        if (arr.isEmpty()) {
+            builder.append(Component.text("]", NamedTextColor.GRAY));
+            return;
+        }
+        for (int i = 0; i < arr.size(); i++) {
+            builder.append(Component.newline());
+            appendIndent(builder, indent + 1);
+            appendJsonElement(builder, arr.get(i), indent + 1);
+            if (i < arr.size() - 1) {
+                builder.append(Component.text(",", NamedTextColor.GRAY));
+            }
+        }
+        builder.append(Component.newline());
+        appendIndent(builder, indent);
+        builder.append(Component.text("]", NamedTextColor.GRAY));
+    }
+
+    private void appendJsonPrimitive(TextComponent.Builder builder, JsonPrimitive primitive) {
+        if (primitive.isBoolean()) {
+            builder.append(Component.text(primitive.getAsBoolean() ? "true" : "false", NamedTextColor.LIGHT_PURPLE));
+            return;
+        }
+        if (primitive.isNumber()) {
+            builder.append(Component.text(primitive.getAsString(), NamedTextColor.GOLD));
+            return;
+        }
+        builder.append(Component.text("\"" + primitive.getAsString() + "\"", NamedTextColor.GREEN));
+    }
+
+    private void appendIndent(TextComponent.Builder builder, int indent) {
+        if (indent <= 0) {
+            return;
+        }
+        builder.append(Component.text("  ".repeat(indent), NamedTextColor.DARK_GRAY));
+    }
+
+    private String getServerStatusText(McpManager.McpServerSnapshot server) {
+        if (!server.isEnabled()) {
+            return "禁用";
+        }
+        if (server.getCircuitRemainingMillis() > 0) {
+            return "熔断";
+        }
+        if (server.isAvailable()) {
+            return "可用";
+        }
+        return "不可用";
+    }
+
+    private NamedTextColor getServerStatusColor(McpManager.McpServerSnapshot server) {
+        if (!server.isEnabled()) {
+            return NamedTextColor.DARK_GRAY;
+        }
+        if (server.getCircuitRemainingMillis() > 0) {
+            return NamedTextColor.GOLD;
+        }
+        if (server.isAvailable()) {
+            return NamedTextColor.GREEN;
+        }
+        return NamedTextColor.RED;
+    }
+
+    private String getServerStatusTextBracket(McpManager.McpServerSnapshot server) {
+        String status = getServerStatusText(server);
+        ChatColor color;
+        if (!server.isEnabled()) {
+            color = ChatColor.DARK_GRAY;
+        } else if (server.getCircuitRemainingMillis() > 0) {
+            color = ChatColor.GOLD;
+        } else if (server.isAvailable()) {
+            color = ChatColor.GREEN;
+        } else {
+            color = ChatColor.RED;
+        }
+        return color + "[" + status + "]";
     }
 }

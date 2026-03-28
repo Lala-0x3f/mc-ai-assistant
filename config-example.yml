@@ -1,5 +1,6 @@
 # MC AI Assistant 配置示例
 # 此文件展示所有可用的配置项，实际运行时会在 plugins/McAiAssistant/config.yml 生成
+# MCP 服务器配置请使用同目录下的 mcp.json（默认为空配置，MCP 为禁用）
 
 # AI API 配置
 ai:

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -6,16 +6,16 @@
 
     <groupId>com.mcaiassistant</groupId>
     <artifactId>mc-ai-assistant</artifactId>
-    <version>0.2.0</version>
+    <version>0.2.1-rc4</version>
     <packaging>jar</packaging>
 
     <name>MC AI Assistant</name>
     <description>AI Assistant plugin for PaperMC 1.21.x (1.21-1.21.11)</description>
 
     <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <mcp.sdk.version>0.16.0</mcp.sdk.version>
     </properties>
 
     <repositories>
@@ -59,12 +59,24 @@
             <version>2.10.1</version>
         </dependency>
 
-        <!-- Vault 经济接口（兼容 CMI 等经济插件） -->
+        <!-- Vault 缁忔祹鎺ュ彛锛堝吋瀹?CMI 绛夌粡娴庢彃浠讹級 -->
         <dependency>
             <groupId>com.github.MilkBowl</groupId>
             <artifactId>VaultAPI</artifactId>
             <version>1.7</version>
             <scope>provided</scope>
+        </dependency>
+
+        <!-- MCP Java SDK -->
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp</artifactId>
+            <version>${mcp.sdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp-json-jackson2</artifactId>
+            <version>${mcp.sdk.version}</version>
         </dependency>
     </dependencies>
 
@@ -75,8 +87,7 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
-                    <source>21</source>
-                    <target>21</target>
+                    <release>21</release>
                 </configuration>
             </plugin>
             
@@ -103,6 +114,22 @@
                                 <relocation>
                                     <pattern>com.google.gson</pattern>
                                     <shadedPattern>com.mcaiassistant.libs.gson</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>io.modelcontextprotocol</pattern>
+                                    <shadedPattern>com.mcaiassistant.libs.mcp</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.fasterxml.jackson</pattern>
+                                    <shadedPattern>com.mcaiassistant.libs.jackson</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>reactor</pattern>
+                                    <shadedPattern>com.mcaiassistant.libs.reactor</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.reactivestreams</pattern>
+                                    <shadedPattern>com.mcaiassistant.libs.reactivestreams</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>

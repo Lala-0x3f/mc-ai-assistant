@@ -18,6 +18,7 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import com.google.gson.JsonObject;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,6 +45,7 @@ public class ChatListener implements Listener {
     private final EconomyManager economyManager;
     private final GlobalMemoryManager globalMemoryManager;
     private final CommandWhitelistManager commandWhitelistManager;
+    private final McpManager mcpManager;
     
     // 智能匹配模式，避免匹配到 @airport 等词
     private static final Pattern SMART_AI_PATTERN = Pattern.compile("(?:^|\\s)@ai(?:\\s|$|[^a-zA-Z])", Pattern.CASE_INSENSITIVE);
@@ -58,7 +60,8 @@ public class ChatListener implements Listener {
                        SearchApiClient searchApiClient, KnowledgeBaseManager knowledgeBaseManager,
                        ImageApiClient imageApiClient, ToastNotification toastNotification,
                        RateLimitManager rateLimitManager, EconomyManager economyManager,
-                       GlobalMemoryManager globalMemoryManager, CommandWhitelistManager commandWhitelistManager) {
+                       GlobalMemoryManager globalMemoryManager, CommandWhitelistManager commandWhitelistManager,
+                       McpManager mcpManager) {
         this.plugin = plugin;
         this.configManager = configManager;
         this.chatHistoryManager = chatHistoryManager;
@@ -71,6 +74,7 @@ public class ChatListener implements Listener {
         this.economyManager = economyManager;
         this.globalMemoryManager = globalMemoryManager;
         this.commandWhitelistManager = commandWhitelistManager;
+        this.mcpManager = mcpManager;
     }
     
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
@@ -478,6 +482,7 @@ public class ChatListener implements Listener {
 
         int knowledgeCalls = 0;
         int maxSteps = 6;
+        Set<String> failedMcpTargets = new HashSet<>();
 
         for (int step = 0; step < maxSteps; step++) {
             appendAssistantMessage(messages, current);
@@ -496,29 +501,52 @@ public class ChatListener implements Listener {
                 lastToolName = call.getName();
                 String toolResult;
 
-                switch (call.getName()) {
-                    case "query_knowledge":
-                        knowledgeCalls++;
-                        if (knowledgeCalls > 2) {
-                            toolResult = "已达到 query_knowledge 最大调用次数(2)，本次查询被跳过。";
-                        } else {
-                            notifyToolCall(player, "知识库查询");
-                            toolResult = runKnowledgeTool(call);
-                        }
-                        appendToolMessage(messages, call, toolResult);
-                        break;
-                    case "execute_command":
-                        notifyToolCall(player, "后台指令");
-                        toolResult = runCommandTool(call);
-                        appendToolMessage(messages, call, toolResult);
-                        break;
-                    case "create_image":
-                        toolResult = runImageTool(player, call);
-                        appendToolMessage(messages, call, toolResult);
-                        break;
-                    default:
-                        appendToolMessage(messages, call, "未知工具: " + call.getName());
-                        break;
+                try {
+                    switch (call.getName()) {
+                        case "query_knowledge":
+                            knowledgeCalls++;
+                            if (knowledgeCalls > 2) {
+                                toolResult = "已达到 query_knowledge 最大调用次数(2)，本次查询被跳过。";
+                            } else {
+                                notifyToolCall(player, "知识库查询");
+                                toolResult = runKnowledgeTool(call);
+                            }
+                            appendToolMessage(messages, call, toolResult);
+                            break;
+                        case "execute_command":
+                            notifyToolCall(player, "后台指令");
+                            toolResult = runCommandTool(call);
+                            appendToolMessage(messages, call, toolResult);
+                            break;
+                        case "create_image":
+                            toolResult = runImageTool(player, call);
+                            appendToolMessage(messages, call, toolResult);
+                            break;
+                        case "mcp_call":
+                            notifyToolCall(player, "MCP 工具");
+                            String mcpServer = getToolArg(call, "server");
+                            String mcpTool = getToolArg(call, "tool");
+                            String mcpKey = (mcpServer == null ? "" : mcpServer.trim()) + "|" + (mcpTool == null ? "" : mcpTool.trim());
+                            if (failedMcpTargets.contains(mcpKey)) {
+                                toolResult = "已跳过重复失败的 MCP 调用: " + mcpKey;
+                            } else {
+                                toolResult = runMcpTool(call);
+                                if (isMcpFailureResult(toolResult)) {
+                                    failedMcpTargets.add(mcpKey);
+                                }
+                            }
+                            appendToolMessage(messages, call, toolResult);
+                            break;
+                        default:
+                            appendToolMessage(messages, call, "未知工具: " + call.getName());
+                            break;
+                    }
+                } catch (Exception e) {
+                    String err = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                    if (configManager.isDebugMode()) {
+                        plugin.getLogger().warning("[Agent] 工具调用异常(" + call.getName() + "): " + err);
+                    }
+                    appendToolMessage(messages, call, "工具调用异常(" + call.getName() + "): " + err);
                 }
             }
 
@@ -531,6 +559,16 @@ public class ChatListener implements Listener {
         }
 
         if (current != null && current.hasToolCalls()) {
+            try {
+                AiApiClient.AiResponse fallback = aiApiClient.sendChatCompletionWithMessages(messages, false);
+                if (fallback != null && fallback.getContent() != null && !fallback.getContent().trim().isEmpty()) {
+                    return fallback.getContent();
+                }
+            } catch (Exception e) {
+                if (configManager.isDebugMode()) {
+                    plugin.getLogger().warning("[Agent] 工具过多后的无工具兜底失败: " + e.getMessage());
+                }
+            }
             return "抱歉，我在处理过程中触发了过多工具调用，为避免影响服务器性能，本次已中止。请换一种问法或减少需求复杂度。";
         }
         return current == null ? null : current.getContent();
@@ -595,7 +633,7 @@ public class ChatListener implements Listener {
         return content == null ? "未在本地知识库中找到相关资料。" : content;
     }
 
-    private String runCommandTool(AiApiClient.ToolCall call) throws Exception {
+    private String runCommandTool(AiApiClient.ToolCall call) {
         if (commandWhitelistManager == null || !commandWhitelistManager.isEnabled()) {
             return "指令白名单未启用。";
         }
@@ -604,13 +642,27 @@ public class ChatListener implements Listener {
             return "缺少 command 参数。";
         }
         String normalized = normalizeCommand(command);
+        String displayCommand = summarizeCommandForToolResult(normalized);
         if (!commandWhitelistManager.isCommandAllowed(normalized)) {
-            return "指令被白名单拒绝: " + normalized;
+            return "指令被白名单拒绝: " + displayCommand;
         }
-        return Bukkit.getScheduler().callSyncMethod(plugin, () -> {
-            boolean success = Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), normalized);
-            return "执行指令: " + normalized + "\n结果: " + (success ? "成功" : "失败");
-        }).get();
+        try {
+            return Bukkit.getScheduler().callSyncMethod(plugin, () -> {
+                StringBuilder output = new StringBuilder();
+                org.bukkit.command.CommandSender fakeSender = Bukkit.createCommandSender(
+                    component -> output.append(net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(component)).append("\n")
+                );
+                boolean success = Bukkit.getServer().dispatchCommand(fakeSender, normalized);
+                String result = "执行指令: " + displayCommand + "\n结果: " + (success ? "成功" : "失败");
+                if (output.length() > 0) {
+                    result += "\n输出: " + output.toString().trim();
+                }
+                return result;
+            }).get();
+        } catch (Exception e) {
+            String err = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            return "执行指令异常: " + displayCommand + "\n错误: " + err;
+        }
     }
 
     private String runImageTool(Player player, AiApiClient.ToolCall call) {
@@ -681,6 +733,29 @@ public class ChatListener implements Listener {
             return "图像生成失败: " + err;
         }
         return "图像生成成功: " + safeAlt + "\nimages: " + imageResponse.getImages();
+    }
+
+    private String runMcpTool(AiApiClient.ToolCall call) {
+        if (mcpManager == null || !mcpManager.hasEnabledServers()) {
+            return "MCP 未启用或当前不可用（可能全部熔断）。";
+        }
+        String server = getToolArg(call, "server");
+        String toolName = getToolArg(call, "tool");
+        JsonObject args = getToolArgObject(call, "arguments");
+        return mcpManager.callTool(server, toolName, args);
+    }
+
+    private boolean isMcpFailureResult(String result) {
+        if (result == null || result.trim().isEmpty()) {
+            return true;
+        }
+        return result.startsWith("MCP 工具调用失败:")
+                || result.startsWith("MCP 熔断中:")
+                || result.startsWith("MCP 未启用或当前不可用")
+                || result.startsWith("MCP 服务器未启用或不存在:")
+                || result.startsWith("缺少 server 参数。")
+                || result.startsWith("缺少 tool 参数。")
+                || result.startsWith("MCP 工具返回空结果。");
     }
 
     private String buildDedupKey(Player player, String message) {
@@ -1489,8 +1564,16 @@ public class ChatListener implements Listener {
         CompletableFuture.supplyAsync(() -> {
             try {
                 return Bukkit.getScheduler().callSyncMethod(plugin, () -> {
-                    boolean success = Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), normalized);
-                    return "执行指令: " + normalized + "\n结果: " + (success ? "成功" : "失败");
+                    StringBuilder output = new StringBuilder();
+                    org.bukkit.command.CommandSender fakeSender = Bukkit.createCommandSender(
+                        component -> output.append(net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(component)).append("\n")
+                    );
+                    boolean success = Bukkit.getServer().dispatchCommand(fakeSender, normalized);
+                    String result = "执行指令: " + normalized + "\n结果: " + (success ? "成功" : "失败");
+                    if (output.length() > 0) {
+                        result += "\n输出: " + output.toString().trim();
+                    }
+                    return result;
                 }).get();
             } catch (Exception e) {
                 return "执行指令异常: " + normalized + "\n错误: " + e.getMessage();
@@ -1523,7 +1606,19 @@ public class ChatListener implements Listener {
         if (trimmed.startsWith("/")) {
             trimmed = trimmed.substring(1).trim();
         }
-        return trimmed.replaceAll("\\s+", " ");
+        return trimmed.replace('\r', ' ').replace('\n', ' ').trim();
+    }
+
+    private String summarizeCommandForToolResult(String command) {
+        if (command == null) {
+            return "";
+        }
+        String normalized = command.trim();
+        int maxLen = 240;
+        if (normalized.length() <= maxLen) {
+            return normalized;
+        }
+        return normalized.substring(0, maxLen) + "... (len=" + normalized.length() + ")";
     }
 
     /**
@@ -1544,6 +1639,27 @@ public class ChatListener implements Listener {
         }
     }
 
+    /**
+     * 获取工具参数（对象）
+     */
+    private JsonObject getToolArgObject(AiApiClient.ToolCall toolCall, String key) {
+        if (toolCall == null || key == null) {
+            return null;
+        }
+        JsonObject args = toolCall.getArguments();
+        if (args == null || !args.has(key) || args.get(key).isJsonNull()) {
+            return null;
+        }
+        try {
+            if (args.get(key).isJsonObject()) {
+                return args.getAsJsonObject(key);
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
+        return null;
+    }
+
     private static class ResponseWrapper {
         private AiApiClient.AiResponse response;
         private boolean failed;
@@ -1561,4 +1677,3 @@ public class ChatListener implements Listener {
         processedMessages.entrySet().removeIf(entry -> entry.getValue() < expirationTime);
     }
 }
-
