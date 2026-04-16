@@ -217,7 +217,7 @@ public class AiApiClient {
      * @return AI 响应（含工具调用）
      */
     public AiResponse sendMessageWithTools(String message, List<String> context) throws IOException {
-        return sendMessageWithTools(message, context, null);
+        return sendMessageWithTools(message, context, null, null);
     }
 
     /**
@@ -228,8 +228,8 @@ public class AiApiClient {
      * @param imageBase64 可选的 base64 编码图片（JPEG），为 null 时不附带图片
      * @return AI 响应（含工具调用）
      */
-    public AiResponse sendMessageWithTools(String message, List<String> context, String imageBase64) throws IOException {
-        return sendMessageInternal(message, context, false, null, true, imageBase64);
+    public AiResponse sendMessageWithTools(String message, List<String> context, String imageBase64, String imagePromptContext) throws IOException {
+        return sendMessageInternal(message, context, false, null, true, imageBase64, imagePromptContext);
     }
 
     /**
@@ -244,13 +244,13 @@ public class AiApiClient {
      */
     private AiResponse sendMessageInternal(String message, List<String> context, boolean isSearch, String knowledgeInfo,
                                            boolean includeTools) throws IOException {
-        return sendMessageInternal(message, context, isSearch, knowledgeInfo, includeTools, null);
+        return sendMessageInternal(message, context, isSearch, knowledgeInfo, includeTools, null, null);
     }
 
     private AiResponse sendMessageInternal(String message, List<String> context, boolean isSearch, String knowledgeInfo,
-                                           boolean includeTools, String imageBase64) throws IOException {
+                                           boolean includeTools, String imageBase64, String imagePromptContext) throws IOException {
         // 构建请求体
-        JsonObject requestBody = buildRequestBody(message, context, isSearch, knowledgeInfo, includeTools, imageBase64);
+        JsonObject requestBody = buildRequestBody(message, context, isSearch, knowledgeInfo, includeTools, imageBase64, imagePromptContext);
 
         // 创建 HTTP 请求
         Request.Builder requestBuilder = new Request.Builder()
@@ -410,14 +410,14 @@ public class AiApiClient {
      */
     private JsonObject buildRequestBody(String message, List<String> context, boolean isSearch, String knowledgeInfo,
                                         boolean includeTools) {
-        return buildRequestBody(message, context, isSearch, knowledgeInfo, includeTools, null);
+        return buildRequestBody(message, context, isSearch, knowledgeInfo, includeTools, null, null);
     }
 
     /**
      * 构建 API 请求体（支持可选图片）
      */
     private JsonObject buildRequestBody(String message, List<String> context, boolean isSearch, String knowledgeInfo,
-                                        boolean includeTools, String imageBase64) {
+                                        boolean includeTools, String imageBase64, String imagePromptContext) {
         JsonObject requestBody = new JsonObject();
  
         // 根据是否为搜索请求选择模型
@@ -451,7 +451,7 @@ public class AiApiClient {
         // 添加当前用户消息（包含服务器信息，可选附带截图）
         JsonObject userMessage = new JsonObject();
         userMessage.addProperty("role", "user");
-        String enhancedMessage = buildEnhancedMessage(message, isSearch);
+        String enhancedMessage = buildEnhancedMessage(message, isSearch, imagePromptContext);
 
         if (imageBase64 != null && !imageBase64.isEmpty()) {
             // 使用 vision 格式：content 为数组，包含文本和图片
@@ -831,7 +831,7 @@ public class AiApiClient {
     /**
      * 构建包含服务器信息的增强消息
      */
-    private String buildEnhancedMessage(String originalMessage, boolean isSearch) {
+    private String buildEnhancedMessage(String originalMessage, boolean isSearch, String imagePromptContext) {
         StringBuilder enhancedMessage = new StringBuilder();
 
         // 添加当前时间信息
@@ -852,9 +852,17 @@ public class AiApiClient {
                     .append(" 等 ").append(onlinePlayers.size()).append(" 人\n");
         }
 
+        if (imagePromptContext != null && !imagePromptContext.trim().isEmpty()) {
+            enhancedMessage.append("截图说明: ").append(imagePromptContext.trim()).append("\n");
+        }
+
         enhancedMessage.append("\n用户问题: ").append(originalMessage);
 
         return enhancedMessage.toString();
+    }
+
+    private String buildEnhancedMessage(String originalMessage, boolean isSearch) {
+        return buildEnhancedMessage(originalMessage, isSearch, null);
     }
 
     /**

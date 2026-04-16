@@ -19,9 +19,12 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.zip.CRC32;
 
 /**
  * 客户端截图处理器。
@@ -40,6 +43,7 @@ public final class ScreenshotHandler {
     private static final int TARGET_SHORT_EDGE = 720;
     private static final float JPEG_QUALITY = 0.78f;
     private static final int MAX_BASE64_BYTES = 4 * 1024 * 1024;
+    private static final AtomicLong REQUEST_SEQUENCE = new AtomicLong();
 
     private ScreenshotHandler() {
     }
@@ -91,11 +95,27 @@ public final class ScreenshotHandler {
                 return;
             }
 
-            ClientPlayNetworking.send(new VisionPackets.ResponsePayload(base64));
-            LOGGER.info("[mcai-vision] 截图已发送，base64 大小: {} bytes", base64.length());
+            long requestId = REQUEST_SEQUENCE.incrementAndGet();
+            int crc32 = computeCrc32(base64);
+            int chunkSize = VisionPackets.MAX_RESPONSE_CHUNK_BYTES;
+            int chunkCount = (base64.length() + chunkSize - 1) / chunkSize;
+            for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
+                int start = chunkIndex * chunkSize;
+                int end = Math.min(base64.length(), start + chunkSize);
+                String chunk = base64.substring(start, end);
+                ClientPlayNetworking.send(new VisionPackets.ResponsePayload(requestId, chunkIndex, chunkCount, crc32, chunk));
+            }
+            LOGGER.info("[mcai-vision] 截图已分片发送，请求={}, base64 大小: {} bytes, 分片数: {}, crc32={}",
+                    requestId, base64.length(), chunkCount, Integer.toUnsignedString(crc32));
         } catch (Exception e) {
             LOGGER.error("[mcai-vision] 截图压缩/发包异常: {}", e.getMessage(), e);
         }
+    }
+
+    private static int computeCrc32(String base64) {
+        CRC32 crc32 = new CRC32();
+        crc32.update(base64.getBytes(StandardCharsets.UTF_8));
+        return (int) crc32.getValue();
     }
 
     private static String compressToBase64(ByteBuffer pixelBuffer, int width, int height) {

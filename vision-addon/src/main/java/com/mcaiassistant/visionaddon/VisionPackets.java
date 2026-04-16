@@ -13,6 +13,7 @@ public final class VisionPackets {
     public static final Identifier REQUEST_IDENTIFIER = Identifier.of("mcai", "vision/request");
     public static final Identifier RESPONSE_IDENTIFIER = Identifier.of("mcai", "vision/response");
     public static final Identifier HELLO_IDENTIFIER = Identifier.of("mcai", "vision/hello");
+    public static final int MAX_RESPONSE_CHUNK_BYTES = 29_990;
 
     private VisionPackets() {
     }
@@ -40,11 +41,23 @@ public final class VisionPackets {
         }
     }
 
-    public record ResponsePayload(String base64) implements CustomPayload {
+    public record ResponsePayload(long requestId, int chunkIndex, int chunkCount, int crc32, String base64Chunk) implements CustomPayload {
         public static final Id<ResponsePayload> ID = new Id<>(RESPONSE_IDENTIFIER);
         public static final PacketCodec<RegistryByteBuf, ResponsePayload> CODEC = PacketCodec.of(
-                (ResponsePayload payload, RegistryByteBuf buf) -> buf.writeString(payload.base64()),
-                buf -> new ResponsePayload(buf.readString())
+                (ResponsePayload payload, RegistryByteBuf buf) -> {
+                    buf.writeVarLong(payload.requestId());
+                    buf.writeVarInt(payload.chunkIndex());
+                    buf.writeVarInt(payload.chunkCount());
+                    buf.writeInt(payload.crc32());
+                    buf.writeString(payload.base64Chunk(), MAX_RESPONSE_CHUNK_BYTES);
+                },
+                buf -> new ResponsePayload(
+                        buf.readVarLong(),
+                        buf.readVarInt(),
+                        buf.readVarInt(),
+                        buf.readInt(),
+                        buf.readString(MAX_RESPONSE_CHUNK_BYTES)
+                )
         );
 
         @Override

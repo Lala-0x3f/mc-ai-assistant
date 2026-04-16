@@ -3,12 +3,14 @@ package com.mcaiassistant.mcaiassistant;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.messaging.PluginMessageListener;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.CRC32;
 
 /**
  * 截图管理器
@@ -17,7 +19,7 @@ import java.util.concurrent.TimeUnit;
  *
  * 通道协议：
  *   S→C  mcai:vision/request  (无 payload，仅触发截图)
- *   C→S  mcai:vision/response (UTF-8 base64 JPEG 字符串)
+ *   C→S  mcai:vision/response (VarLong requestId + VarInt chunkIndex + VarInt chunkCount + int crc32 + UTF-8 base64 分片)
  *   C→S  mcai:vision/hello    (客户端能力声明)
  */
 public class ScreenshotManager implements PluginMessageListener {
@@ -29,9 +31,12 @@ public class ScreenshotManager implements PluginMessageListener {
     private static final long SCREENSHOT_TIMEOUT_MS = 5000;
     private static final int MAX_HELLO_BYTES = 256;
     private static final String MOD_HELLO_PREFIX = "mcai-vision:";
+    private static final int MAX_RESPONSE_CHUNK_BYTES = 29_990;
+    private static final int MAX_RESPONSE_CHUNKS = 256;
+    private static final int MAX_BASE64_TOTAL_CHARS = 4 * 1024 * 1024;
 
     private final Map<UUID, String> modInstalledPlayers = new ConcurrentHashMap<>();
-    private final Map<UUID, CompletableFuture<String>> pendingRequests = new ConcurrentHashMap<>();
+    private final Map<UUID, PendingRequest> pendingRequests = new ConcurrentHashMap<>();
 
     private final McAiAssistant plugin;
     private final ConfigManager configManager;
@@ -50,9 +55,9 @@ public class ScreenshotManager implements PluginMessageListener {
         plugin.getServer().getMessenger().unregisterIncomingPluginChannel(plugin, CHANNEL_RESPONSE, this);
         plugin.getServer().getMessenger().unregisterIncomingPluginChannel(plugin, CHANNEL_HELLO, this);
 
-        pendingRequests.values().forEach(future -> {
-            if (future != null && !future.isDone()) {
-                future.complete(null);
+        pendingRequests.values().forEach(pending -> {
+            if (pending != null) {
+                pending.future.complete(null);
             }
         });
         pendingRequests.clear();
@@ -66,8 +71,7 @@ public class ScreenshotManager implements PluginMessageListener {
             return;
         }
         if (CHANNEL_RESPONSE.equals(channel)) {
-            String imageBase64 = new String(message, StandardCharsets.UTF_8);
-            receiveScreenshot(player.getUniqueId(), imageBase64);
+            handleScreenshotChunk(player, message);
         }
     }
 
@@ -94,6 +98,41 @@ public class ScreenshotManager implements PluginMessageListener {
         registerModPlayer(player.getUniqueId(), modVersion);
     }
 
+    private void handleScreenshotChunk(Player player, byte[] message) {
+        UUID playerUuid = player.getUniqueId();
+        PendingRequest pending = pendingRequests.get(playerUuid);
+        if (pending == null || pending.future.isDone()) {
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[截图] 收到玩家 " + player.getName() + " 的截图分片，但当前无等待请求，已忽略");
+            }
+            return;
+        }
+
+        if (message == null || message.length == 0) {
+            failPendingRequest(playerUuid, pending, "收到空截图分片");
+            return;
+        }
+
+        try {
+            ByteBuffer buffer = ByteBuffer.wrap(message);
+            long requestId = readVarLong(buffer);
+            int chunkIndex = readVarInt(buffer);
+            int chunkCount = readVarInt(buffer);
+            int crc32 = buffer.getInt();
+            int chunkBytesLength = readVarInt(buffer);
+            if (chunkBytesLength < 0 || chunkBytesLength > buffer.remaining()) {
+                throw new IllegalArgumentException("字符串字节长度非法: " + chunkBytesLength + ", remaining=" + buffer.remaining());
+            }
+
+            byte[] chunkBytes = new byte[chunkBytesLength];
+            buffer.get(chunkBytes);
+            String chunk = new String(chunkBytes, StandardCharsets.UTF_8);
+            receiveScreenshotChunk(playerUuid, requestId, chunkIndex, chunkCount, crc32, chunk);
+        } catch (Exception e) {
+            failPendingRequest(playerUuid, pending, "解析截图分片失败: " + e.getMessage());
+        }
+    }
+
     public void registerModPlayer(UUID playerUuid, String version) {
         modInstalledPlayers.put(playerUuid, version);
         if (configManager.isDebugMode()) {
@@ -103,9 +142,9 @@ public class ScreenshotManager implements PluginMessageListener {
 
     public void unregisterPlayer(UUID playerUuid) {
         modInstalledPlayers.remove(playerUuid);
-        CompletableFuture<String> pending = pendingRequests.remove(playerUuid);
-        if (pending != null && !pending.isDone()) {
-            pending.complete(null);
+        PendingRequest pending = pendingRequests.remove(playerUuid);
+        if (pending != null) {
+            pending.future.complete(null);
         }
     }
 
@@ -127,13 +166,13 @@ public class ScreenshotManager implements PluginMessageListener {
             return CompletableFuture.completedFuture(null);
         }
 
-        CompletableFuture<String> existing = pendingRequests.get(uuid);
-        if (existing != null && !existing.isDone()) {
-            existing.complete(null);
+        PendingRequest previous = pendingRequests.remove(uuid);
+        if (previous != null) {
+            previous.future.complete(null);
         }
 
-        CompletableFuture<String> future = new CompletableFuture<>();
-        pendingRequests.put(uuid, future);
+        PendingRequest pending = new PendingRequest(new CompletableFuture<>());
+        pendingRequests.put(uuid, pending);
 
         try {
             plugin.getServer().getScheduler().runTask(plugin, () -> {
@@ -145,38 +184,194 @@ public class ScreenshotManager implements PluginMessageListener {
                                 + "，等待回传（超时 " + SCREENSHOT_TIMEOUT_MS + "ms）");
                     }
                 } catch (Exception e) {
-                    plugin.getLogger().warning("[截图] 发送截图请求包失败: " + e.getMessage());
-                    pendingRequests.remove(uuid);
-                    future.complete(null);
+                    failPendingRequest(uuid, pending, "发送截图请求包失败: " + e.getMessage());
                 }
             });
         } catch (Exception e) {
-            plugin.getLogger().warning("[截图] 调度截图请求失败: " + e.getMessage());
-            pendingRequests.remove(uuid);
+            failPendingRequest(uuid, pending, "调度截图请求失败: " + e.getMessage());
             return CompletableFuture.completedFuture(null);
         }
 
-        future.completeOnTimeout(null, SCREENSHOT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                .whenComplete((result, throwable) -> pendingRequests.remove(uuid, future));
+        pending.future.completeOnTimeout(null, SCREENSHOT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .whenComplete((result, throwable) -> pendingRequests.remove(uuid, pending));
 
-        return future;
+        return pending.future;
     }
 
-    public void receiveScreenshot(UUID playerUuid, String imageBase64) {
-        CompletableFuture<String> future = pendingRequests.remove(playerUuid);
-        if (future != null && !future.isDone()) {
-            if (imageBase64 != null && imageBase64.length() > 4 * 1024 * 1024) {
-                plugin.getLogger().warning("[截图] 玩家 " + playerUuid + " 回传的截图数据过大（" + imageBase64.length() + " chars），已丢弃");
-                future.complete(null);
+    public void receiveScreenshotChunk(UUID playerUuid, long requestId, int chunkIndex, int chunkCount, int crc32, String chunk) {
+        PendingRequest pending = pendingRequests.get(playerUuid);
+        if (pending == null || pending.future.isDone()) {
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[截图] 收到玩家 " + playerUuid + " 的截图分片，但已超时或无等待请求，丢弃");
+            }
+            return;
+        }
+
+        if (pending.requestId == null) {
+            pending.requestId = requestId;
+        } else if (pending.requestId.longValue() != requestId) {
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[截图] 丢弃玩家 " + playerUuid + " 的过期/串线截图分片，请求=" + requestId + "，当前请求=" + pending.requestId);
+            }
+            return;
+        }
+
+        if (chunkCount <= 0 || chunkCount > MAX_RESPONSE_CHUNKS || chunkIndex < 0 || chunkIndex >= chunkCount) {
+            failPendingRequest(playerUuid, pending, "截图分片索引非法: index=" + chunkIndex + ", count=" + chunkCount);
+            return;
+        }
+
+        if (chunk == null || chunk.length() > MAX_RESPONSE_CHUNK_BYTES) {
+            failPendingRequest(playerUuid, pending, "截图分片长度非法: " + (chunk == null ? -1 : chunk.length()));
+            return;
+        }
+
+        if (pending.assembly == null) {
+            pending.assembly = new PendingScreenshotAssembly(chunkCount, crc32);
+        } else if (pending.assembly.chunkCount != chunkCount || pending.assembly.crc32 != crc32) {
+            failPendingRequest(playerUuid, pending, "截图分片元数据不一致，已中止本次传输");
+            return;
+        }
+
+        PendingScreenshotAssembly.AddChunkResult addResult = pending.assembly.addChunk(chunkIndex, chunk, MAX_BASE64_TOTAL_CHARS);
+        if (addResult == PendingScreenshotAssembly.AddChunkResult.TOO_LARGE) {
+            failPendingRequest(playerUuid, pending, "截图分片累计过大，已丢弃");
+            return;
+        }
+        if (addResult == PendingScreenshotAssembly.AddChunkResult.CONFLICT) {
+            failPendingRequest(playerUuid, pending, "同一分片索引收到不一致内容，已中止本次传输");
+            return;
+        }
+
+        if (pending.assembly.isComplete()) {
+            String imageBase64 = pending.assembly.join();
+            if (imageBase64 == null) {
+                failPendingRequest(playerUuid, pending, "截图分片未完整拼接");
                 return;
             }
-            future.complete(imageBase64);
-            if (configManager.isDebugMode()) {
-                int sizeKb = imageBase64 == null ? 0 : imageBase64.length() * 3 / 4 / 1024;
-                plugin.getLogger().info("[截图] 收到玩家 " + playerUuid + " 的截图，约 " + sizeKb + " KB");
+            if (computeCrc32(imageBase64) != pending.assembly.crc32) {
+                failPendingRequest(playerUuid, pending, "截图 CRC32 校验失败，已丢弃");
+                return;
             }
-        } else if (configManager.isDebugMode()) {
-            plugin.getLogger().info("[截图] 收到玩家 " + playerUuid + " 的截图，但已超时或无等待请求，丢弃");
+
+            pending.future.complete(imageBase64);
+            pendingRequests.remove(playerUuid, pending);
+            if (configManager.isDebugMode()) {
+                int sizeKb = imageBase64.length() * 3 / 4 / 1024;
+                plugin.getLogger().info("[截图] 收到玩家 " + playerUuid + " 的截图，请求=" + requestId
+                        + "，共 " + chunkCount + " 片，约 " + sizeKb + " KB，crc32=" + Integer.toUnsignedString(crc32));
+            }
+        }
+    }
+
+    private void failPendingRequest(UUID playerUuid, PendingRequest pending, String reason) {
+        plugin.getLogger().warning("[截图] 玩家 " + playerUuid + " 的截图请求失败: " + reason);
+        pendingRequests.remove(playerUuid, pending);
+        pending.future.complete(null);
+    }
+
+    private static int computeCrc32(String base64) {
+        CRC32 crc32 = new CRC32();
+        crc32.update(base64.getBytes(StandardCharsets.UTF_8));
+        return (int) crc32.getValue();
+    }
+
+    private static int readVarInt(ByteBuffer buffer) {
+        int numRead = 0;
+        int result = 0;
+        byte read;
+        do {
+            if (!buffer.hasRemaining()) {
+                throw new IllegalArgumentException("VarInt 数据不完整");
+            }
+            read = buffer.get();
+            int value = read & 0b01111111;
+            result |= value << (7 * numRead);
+
+            numRead++;
+            if (numRead > 5) {
+                throw new IllegalArgumentException("VarInt 过长");
+            }
+        } while ((read & 0b10000000) != 0);
+
+        return result;
+    }
+
+    private static long readVarLong(ByteBuffer buffer) {
+        int numRead = 0;
+        long result = 0;
+        byte read;
+        do {
+            if (!buffer.hasRemaining()) {
+                throw new IllegalArgumentException("VarLong 数据不完整");
+            }
+            read = buffer.get();
+            long value = read & 0b01111111L;
+            result |= value << (7 * numRead);
+
+            numRead++;
+            if (numRead > 10) {
+                throw new IllegalArgumentException("VarLong 过长");
+            }
+        } while ((read & 0b10000000) != 0);
+
+        return result;
+    }
+
+    private static final class PendingRequest {
+        private final CompletableFuture<String> future;
+        private volatile Long requestId;
+        private volatile PendingScreenshotAssembly assembly;
+
+        private PendingRequest(CompletableFuture<String> future) {
+            this.future = future;
+        }
+    }
+
+    private static final class PendingScreenshotAssembly {
+        private final String[] chunks;
+        private final int chunkCount;
+        private final int crc32;
+        private int receivedCount;
+        private int totalChars;
+
+        private PendingScreenshotAssembly(int chunkCount, int crc32) {
+            this.chunkCount = chunkCount;
+            this.crc32 = crc32;
+            this.chunks = new String[chunkCount];
+        }
+
+        private synchronized AddChunkResult addChunk(int chunkIndex, String chunk, int maxTotalChars) {
+            String existing = chunks[chunkIndex];
+            if (existing != null) {
+                return existing.equals(chunk) ? AddChunkResult.DUPLICATE : AddChunkResult.CONFLICT;
+            }
+            chunks[chunkIndex] = chunk;
+            receivedCount++;
+            totalChars += chunk.length();
+            return totalChars <= maxTotalChars ? AddChunkResult.ADDED : AddChunkResult.TOO_LARGE;
+        }
+
+        private synchronized boolean isComplete() {
+            return receivedCount == chunkCount;
+        }
+
+        private synchronized String join() {
+            StringBuilder builder = new StringBuilder(totalChars);
+            for (String chunk : chunks) {
+                if (chunk == null) {
+                    return null;
+                }
+                builder.append(chunk);
+            }
+            return builder.toString();
+        }
+
+        private enum AddChunkResult {
+            ADDED,
+            DUPLICATE,
+            CONFLICT,
+            TOO_LARGE
         }
     }
 }

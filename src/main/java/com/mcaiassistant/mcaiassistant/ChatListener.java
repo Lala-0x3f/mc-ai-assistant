@@ -300,8 +300,12 @@ public class ChatListener implements Listener {
                         plugin.getLogger().info("AI 请求上下文消息数量: " + context.size());
                     }
 
+                    String imagePromptContext = imageBase64 != null && !imageBase64.isEmpty()
+                            ? "图片为玩家" + player.getName() + "的实时视角"
+                            : null;
+
                     // 调用 AI API（允许工具调用，可选附带截图）
-                    wrapper.response = aiApiClient.sendMessageWithTools(cleanMessage, context, imageBase64);
+                    wrapper.response = aiApiClient.sendMessageWithTools(cleanMessage, context, imageBase64, imagePromptContext);
                     wrapper.failed = false;
                     return wrapper;
                 } catch (Exception e) {
