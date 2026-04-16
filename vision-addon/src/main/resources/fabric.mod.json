@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "mcai-vision",
+  "version": "${version}",
+  "name": "MC AI Vision Addon",
+  "description": "Client-side addon for MC AI Assistant: captures HUD-free screenshots and sends them to the server for AI vision.",
+  "authors": ["ifctmzzz"],
+  "contact": {
+    "sources": "https://github.com/Lala-0x3f/mc-ai-assistant"
+  },
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.mcaiassistant.visionaddon.McAiVisionMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.9",
+    "fabric-api": "*",
+    "minecraft": ">=1.21.10"
+  }
+}

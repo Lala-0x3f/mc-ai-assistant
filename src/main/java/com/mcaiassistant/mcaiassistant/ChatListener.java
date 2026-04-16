@@ -268,36 +268,53 @@ public class ChatListener implements Listener {
         // 在进入异步调用前将扣费结果固化，便于在 Lambda 中安全使用
         final EconomyManager.EconomyChargeResult finalChargeResult = chargeResult;
 
-        // 异步调用 AI API
-        CompletableFuture.supplyAsync(() -> {
-            ResponseWrapper wrapper = new ResponseWrapper();
-            try {
-                if (configManager.isDebugMode()) {
-                    plugin.getLogger().info("开始处理 AI 请求，清理后的消息: " + cleanMessage);
-                }
-
-                // 获取上下文消息
-                List<String> context = configManager.isContextEnabled() ?
-                    chatHistoryManager.getRecentMessages(configManager.getContextMessages()) : null;
-
-                if (configManager.isDebugMode() && context != null) {
-                    plugin.getLogger().info("AI 请求上下文消息数量: " + context.size());
-                }
-
-                // 调用 AI API（允许工具调用）
-                wrapper.response = aiApiClient.sendMessageWithTools(cleanMessage, context);
-                wrapper.failed = false;
-                return wrapper;
-            } catch (Exception e) {
-                plugin.getLogger().severe("AI API 调用失败: " + e.getMessage());
-                if (configManager.isDebugMode()) {
-                    plugin.getLogger().severe("AI API 调用异常详情:");
-                    e.printStackTrace();
-                }
-                wrapper.response = new AiApiClient.AiResponse("抱歉，AI 助手暂时无法响应，请稍后再试。技术详情: " + e.getMessage(), null);
-                wrapper.failed = true;
-                return wrapper;
+        // 尝试请求客户端截图（异步，有超时回退）
+        ScreenshotManager screenshotManager = plugin.getScreenshotManager();
+        CompletableFuture<String> screenshotFuture;
+        if (screenshotManager != null && screenshotManager.hasModInstalled(player)) {
+            screenshotFuture = screenshotManager.requestScreenshot(player);
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[Vision] 玩家 " + player.getName() + " 已安装附属 mod，请求截图");
             }
+        } else {
+            screenshotFuture = CompletableFuture.completedFuture(null);
+        }
+
+        // 截图完成后（或超时/无附属 mod）再调用 AI
+        screenshotFuture.thenCompose(imageBase64 -> {
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[Vision] 截图结果: " + (imageBase64 != null ? "已获取 (" + imageBase64.length() + " chars)" : "无截图"));
+            }
+            return CompletableFuture.supplyAsync(() -> {
+                ResponseWrapper wrapper = new ResponseWrapper();
+                try {
+                    if (configManager.isDebugMode()) {
+                        plugin.getLogger().info("开始处理 AI 请求，清理后的消息: " + cleanMessage);
+                    }
+
+                    // 获取上下文消息
+                    List<String> context = configManager.isContextEnabled() ?
+                        chatHistoryManager.getRecentMessages(configManager.getContextMessages()) : null;
+
+                    if (configManager.isDebugMode() && context != null) {
+                        plugin.getLogger().info("AI 请求上下文消息数量: " + context.size());
+                    }
+
+                    // 调用 AI API（允许工具调用，可选附带截图）
+                    wrapper.response = aiApiClient.sendMessageWithTools(cleanMessage, context, imageBase64);
+                    wrapper.failed = false;
+                    return wrapper;
+                } catch (Exception e) {
+                    plugin.getLogger().severe("AI API 调用失败: " + e.getMessage());
+                    if (configManager.isDebugMode()) {
+                        plugin.getLogger().severe("AI API 调用异常详情:");
+                        e.printStackTrace();
+                    }
+                    wrapper.response = new AiApiClient.AiResponse("抱歉，AI 助手暂时无法响应，请稍后再试。技术详情: " + e.getMessage(), null);
+                    wrapper.failed = true;
+                    return wrapper;
+                }
+            });
         }).thenAccept(result -> {
             // 在主线程中发送响应
             Bukkit.getScheduler().runTask(plugin, () -> {
@@ -307,22 +324,34 @@ public class ChatListener implements Listener {
                 }
 
                 if (result == null || result.response == null || result.failed) {
-                    if (finalChargeResult != null && finalChargeResult.isSuccess()) {
-                        economyManager.refund(player, finalChargeResult.getCost());
-                        if (configManager.isDebugMode()) {
-                            plugin.getLogger().info("[经济扣费] AI 未能响应，已为玩家退款: " + formatCost(finalChargeResult.getCost()));
-                        }
-                    }
-                    // 返回简单提示给玩家
-                    player.sendMessage(ChatColor.RED + "抱歉，AI 助手暂时无法响应，请稍后再试。");
+                    handleAiRequestFailure(player, finalChargeResult, "抱歉，AI 助手暂时无法响应，请稍后再试。");
                     return;
                 }
 
                 sendAiResponse(result.response, player, cleanMessage, finalChargeResult);
             });
+        }).exceptionally(ex -> {
+            plugin.getLogger().severe("AI 请求流程异常: " + ex.getMessage());
+            Bukkit.getScheduler().runTask(plugin, () ->
+                handleAiRequestFailure(player, finalChargeResult, ChatColor.RED + "抱歉，AI 助手暂时无法响应，请稍后再试。"));
+            return null;
         });
     }
     
+    /**
+     * 统一处理 AI 请求失败时的退款与提示。
+     */
+    private void handleAiRequestFailure(Player player, EconomyManager.EconomyChargeResult chargeResult, String message) {
+        if (chargeResult != null && chargeResult.isSuccess()) {
+            economyManager.refund(player, chargeResult.getCost());
+            if (configManager.isDebugMode()) {
+                plugin.getLogger().info("[经济扣费] AI 未能响应，已为玩家退款: " + formatCost(chargeResult.getCost()));
+            }
+        }
+        if (player != null && message != null && !message.isEmpty()) {
+            player.sendMessage(message);
+        }
+    }
     /**
      * 清理消息，移除 AI 触发关键词
      */

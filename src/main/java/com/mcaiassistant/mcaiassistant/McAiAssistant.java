@@ -26,6 +26,7 @@ public class McAiAssistant extends JavaPlugin {
     private EconomyManager economyManager;
     private CommandWhitelistManager commandWhitelistManager;
     private McpManager mcpManager;
+    private ScreenshotManager screenshotManager;
     
     @Override
     public void onEnable() {
@@ -76,6 +77,9 @@ public class McAiAssistant extends JavaPlugin {
         // 初始化 MCP 管理器（mcp.json）
         mcpManager = new McpManager(this);
         mcpManager.initialize();
+
+        // 初始化截图管理器（视觉附属 mod 支持）
+        screenshotManager = new ScreenshotManager(this, configManager);
 
         // 注册聊天监听器
         chatListener = new ChatListener(this, configManager, chatHistoryManager, aiApiClient, searchApiClient, knowledgeBaseManager, imageApiClient, toastNotification, rateLimitManager, economyManager, globalMemoryManager, commandWhitelistManager, mcpManager);
@@ -150,6 +154,10 @@ public class McAiAssistant extends JavaPlugin {
             mcpManager.shutdown();
         }
 
+        if (screenshotManager != null) {
+            screenshotManager.shutdown();
+        }
+
         getLogger().info(ChatColor.YELLOW + "MC AI Assistant 插件已禁用！");
         instance = null;
     }
@@ -222,6 +230,13 @@ public class McAiAssistant extends JavaPlugin {
      */
     public McpManager getMcpManager() {
         return mcpManager;
+    }
+
+    /**
+     * 获取截图管理器（视觉附属 mod 支持）
+     */
+    public ScreenshotManager getScreenshotManager() {
+        return screenshotManager;
     }
     
     /**

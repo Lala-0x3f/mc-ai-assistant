@@ -127,3 +127,5 @@ local-tests/
 
 manim/
 .ace-tool/
+vision-addon/.gradle/
+vision-addon/fabric-networking-api-v1-src/

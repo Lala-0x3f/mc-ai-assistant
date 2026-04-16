@@ -217,7 +217,19 @@ public class AiApiClient {
      * @return AI 响应（含工具调用）
      */
     public AiResponse sendMessageWithTools(String message, List<String> context) throws IOException {
-        return sendMessageInternal(message, context, false, null, true);
+        return sendMessageWithTools(message, context, null);
+    }
+
+    /**
+     * 发送消息到 AI API（允许工具调用，支持可选截图）
+     *
+     * @param message    用户消息
+     * @param context    上下文消息列表
+     * @param imageBase64 可选的 base64 编码图片（JPEG），为 null 时不附带图片
+     * @return AI 响应（含工具调用）
+     */
+    public AiResponse sendMessageWithTools(String message, List<String> context, String imageBase64) throws IOException {
+        return sendMessageInternal(message, context, false, null, true, imageBase64);
     }
 
     /**
@@ -232,8 +244,13 @@ public class AiApiClient {
      */
     private AiResponse sendMessageInternal(String message, List<String> context, boolean isSearch, String knowledgeInfo,
                                            boolean includeTools) throws IOException {
+        return sendMessageInternal(message, context, isSearch, knowledgeInfo, includeTools, null);
+    }
+
+    private AiResponse sendMessageInternal(String message, List<String> context, boolean isSearch, String knowledgeInfo,
+                                           boolean includeTools, String imageBase64) throws IOException {
         // 构建请求体
-        JsonObject requestBody = buildRequestBody(message, context, isSearch, knowledgeInfo, includeTools);
+        JsonObject requestBody = buildRequestBody(message, context, isSearch, knowledgeInfo, includeTools, imageBase64);
 
         // 创建 HTTP 请求
         Request.Builder requestBuilder = new Request.Builder()
@@ -393,6 +410,14 @@ public class AiApiClient {
      */
     private JsonObject buildRequestBody(String message, List<String> context, boolean isSearch, String knowledgeInfo,
                                         boolean includeTools) {
+        return buildRequestBody(message, context, isSearch, knowledgeInfo, includeTools, null);
+    }
+
+    /**
+     * 构建 API 请求体（支持可选图片）
+     */
+    private JsonObject buildRequestBody(String message, List<String> context, boolean isSearch, String knowledgeInfo,
+                                        boolean includeTools, String imageBase64) {
         JsonObject requestBody = new JsonObject();
  
         // 根据是否为搜索请求选择模型
@@ -423,11 +448,31 @@ public class AiApiClient {
             }
         }
 
-        // 添加当前用户消息（包含服务器信息）
+        // 添加当前用户消息（包含服务器信息，可选附带截图）
         JsonObject userMessage = new JsonObject();
         userMessage.addProperty("role", "user");
         String enhancedMessage = buildEnhancedMessage(message, isSearch);
-        userMessage.addProperty("content", enhancedMessage);
+
+        if (imageBase64 != null && !imageBase64.isEmpty()) {
+            // 使用 vision 格式：content 为数组，包含文本和图片
+            JsonArray contentArray = new JsonArray();
+            JsonObject textPart = new JsonObject();
+            textPart.addProperty("type", "text");
+            textPart.addProperty("text", enhancedMessage);
+            contentArray.add(textPart);
+
+            JsonObject imagePart = new JsonObject();
+            imagePart.addProperty("type", "image_url");
+            JsonObject imageUrl = new JsonObject();
+            imageUrl.addProperty("url", "data:image/jpeg;base64," + imageBase64);
+            imageUrl.addProperty("detail", "low");
+            imagePart.add("image_url", imageUrl);
+            contentArray.add(imagePart);
+
+            userMessage.add("content", contentArray);
+        } else {
+            userMessage.addProperty("content", enhancedMessage);
+        }
         messages.add(userMessage);
 
         requestBody.add("messages", messages);
