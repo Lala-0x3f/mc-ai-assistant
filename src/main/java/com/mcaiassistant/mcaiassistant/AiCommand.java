@@ -26,7 +26,7 @@ import java.util.List;
 public class AiCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> ROOT_SUB_COMMANDS = Arrays.asList(
-            "help", "info", "tools", "model", "test", "whitelist", "cmdwl"
+            "help", "info", "tools", "reload", "model", "test", "whitelist", "cmdwl"
     );
 
     private final McAiAssistant plugin;
@@ -78,6 +78,8 @@ public class AiCommand implements CommandExecutor, TabCompleter {
             case "tools":
                 sendTools(sender);
                 return true;
+            case "reload":
+                return handleReload(sender, label, subArgs);
             case "model":
                 return modelCommand.onCommand(sender, command, label + " model", subArgs);
             case "test":
@@ -124,10 +126,28 @@ public class AiCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    private boolean handleReload(CommandSender sender, String label, String[] args) {
+        if (args.length > 0) {
+            sender.sendMessage(ChatColor.YELLOW + "用法: /" + label + " reload");
+            return true;
+        }
+
+        sender.sendMessage(ChatColor.GRAY + "[AI] 正在重新加载配置...");
+        try {
+            plugin.reloadPluginConfig();
+            sender.sendMessage(ChatColor.GREEN + "[AI] 配置重载完成。");
+        } catch (Exception e) {
+            plugin.getLogger().warning("执行 /" + label + " reload 失败: " + e.getMessage());
+            sender.sendMessage(ChatColor.RED + "[AI] 配置重载失败: " + e.getMessage());
+        }
+        return true;
+    }
+
     private void sendHelp(CommandSender sender, String label) {
         sender.sendMessage(ChatColor.YELLOW + "AI 管理指令：");
         sender.sendMessage(ChatColor.GRAY + "/" + label + " info - 查看插件与模型信息");
         sender.sendMessage(ChatColor.GRAY + "/" + label + " tools - 查看启用的工具");
+        sender.sendMessage(ChatColor.GRAY + "/" + label + " reload - 重新加载配置");
         sender.sendMessage(ChatColor.GRAY + "/" + label + " model [modelId] - 查看或切换模型");
         sender.sendMessage(ChatColor.GRAY + "/" + label + " test <all|model|kb> - 健康检查");
         sender.sendMessage(ChatColor.GRAY + "/" + label + " whitelist <list|add|remove|reload> - 管理白名单");
